@@ -35,15 +35,23 @@ const PASOS: DriveStep[] = [
   {
     element: "#tour-insumo-BAJAS",
     popover: {
-      title: "Insumos",
+      title: "1. Bajas",
       description:
-        "Bajas y Cambio de tecnología deben tener el periodo del mes anterior. Si no lo tienen, usa “Extraer del servidor”. También puedes programar la extracción.",
+        "Primer insumo: la tabla de Bajas debe tener el periodo del mes anterior. Si no lo tiene, usa “Extraer del servidor” o programa la extracción. “Revalidar” vuelve a revisarla.",
+    },
+  },
+  {
+    element: "#tour-insumo-CAMBIO_TEC",
+    popover: {
+      title: "2. Cambio de tecnología",
+      description:
+        "Segundo insumo: igual que Bajas, debe tener el periodo del mes anterior; se extrae del mismo servidor con su propio SP. Si las filas varían más de 30% respecto al periodo anterior queda en Advertencia: avisa, pero no bloquea.",
     },
   },
   {
     element: "#tour-mora",
     popover: {
-      title: "Mora",
+      title: "3. Mora",
       description:
         "Ejecuta el SP de mora (~40 min) y sigue su avance. Puedes programarlo para una fecha y hora o cada mes.",
     },
@@ -51,8 +59,24 @@ const PASOS: DriveStep[] = [
   {
     element: "#tour-asignacion",
     popover: {
-      title: "Asignación",
+      title: "4. Asignación",
       description: "Se habilita cuando todos los insumos están OK. Pide confirmación antes de ejecutar.",
+    },
+  },
+  {
+    element: "#tour-sin-asignar",
+    popover: {
+      title: "5. Equipos sin asignar",
+      description:
+        "Equipos que el SP dejó sin agencia por datos inconsistentes. Asígnales una agencia uno a uno o varios a la vez.",
+    },
+  },
+  {
+    element: "#tour-completar",
+    popover: {
+      title: "6. Completar asignación",
+      description:
+        "Cuando no quedan equipos sin agencia, completa la asignación para cerrar el periodo y exportarla a Excel.",
     },
   },
   {

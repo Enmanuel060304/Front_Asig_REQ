@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     # Asignación
     SP_ASIGNACION: str
     ASIGNACION_TIMEOUT_SECONDS: int = 0
+    # Tabla resultado de la asignación (equipos sin agencia y exportación a Excel)
+    ASIGNACION_TABLA: str
+    ASIGNACION_COLUMNA_ID: str
+    ASIGNACION_COLUMNA_AGENCIA: str
+    ASIGNACION_COLUMNAS_VISIBLES: str  # separadas por comas
+
+    # Catálogo de agencias
+    AGENCIAS_TABLA: str
+    AGENCIAS_COLUMNA_VALOR: str  # lo que se escribe en la asignación
+    AGENCIAS_COLUMNA_NOMBRE: str  # lo que ve el usuario
 
     # Programación
     APP_TIMEZONE: str = "America/Guatemala"
@@ -63,19 +73,29 @@ class Settings(BaseSettings):
     FRONTEND_ORIGIN: str = "http://localhost:5173"
 
     @field_validator("BAJAS_TABLA", "CAMBIO_TEC_TABLA", "MORA_TABLA",
-                     "SP_EXTRAER_BAJAS", "SP_EXTRAER_CAMBIO_TEC", "SP_MORA", "SP_ASIGNACION")
+                     "SP_EXTRAER_BAJAS", "SP_EXTRAER_CAMBIO_TEC", "SP_MORA", "SP_ASIGNACION",
+                     "ASIGNACION_TABLA", "AGENCIAS_TABLA")
     @classmethod
     def validar_objeto(cls, v: str, info) -> str:
         if not re.fullmatch(_OBJETO_SQL, v):
             raise ValueError(f"{info.field_name} no es un nombre SQL válido")
         return v
 
-    @field_validator("BAJAS_COLUMNA_PERIODO", "CAMBIO_TEC_COLUMNA_PERIODO")
+    @field_validator("BAJAS_COLUMNA_PERIODO", "CAMBIO_TEC_COLUMNA_PERIODO", "ASIGNACION_COLUMNA_ID",
+                     "ASIGNACION_COLUMNA_AGENCIA", "AGENCIAS_COLUMNA_VALOR", "AGENCIAS_COLUMNA_NOMBRE")
     @classmethod
     def validar_columna(cls, v: str, info) -> str:
         if not re.fullmatch(_COLUMNA_SQL, v):
             raise ValueError(f"{info.field_name} no es un nombre de columna válido")
         return v
+
+    @field_validator("ASIGNACION_COLUMNAS_VISIBLES")
+    @classmethod
+    def validar_columnas(cls, v: str, info) -> str:
+        cols = [c.strip() for c in v.split(",") if c.strip()]
+        if not cols or not all(re.fullmatch(_COLUMNA_SQL, c) for c in cols):
+            raise ValueError(f"{info.field_name} debe ser una lista de columnas separadas por comas")
+        return ",".join(cols)
 
     @field_validator("SP_EXTRAER_BAJAS_PARAM_PERIODO", "SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO")
     @classmethod

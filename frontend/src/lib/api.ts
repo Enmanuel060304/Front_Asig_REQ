@@ -10,6 +10,15 @@ export class ApiError extends Error {
 
 type Metodo = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
+async function lanzarError(res: Response): Promise<never> {
+  const data = await res.json().catch(() => null)
+  const detail = data?.detail
+  if (detail && typeof detail === "object" && "mensaje" in detail) {
+    throw new ApiError(res.status, detail.mensaje, detail.motivos ?? [])
+  }
+  throw new ApiError(res.status, typeof detail === "string" ? detail : `Error ${res.status}`)
+}
+
 async function request<T>(method: Metodo, url: string, body?: unknown): Promise<T> {
   let res: Response
   try {
@@ -25,15 +34,26 @@ async function request<T>(method: Metodo, url: string, body?: unknown): Promise<
   } catch {
     throw new ApiError(0, "Sin conexión con el servidor")
   }
-  if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    const detail = data?.detail
-    if (detail && typeof detail === "object" && "mensaje" in detail) {
-      throw new ApiError(res.status, detail.mensaje, detail.motivos ?? [])
-    }
-    throw new ApiError(res.status, typeof detail === "string" ? detail : `Error ${res.status}`)
-  }
+  if (!res.ok) await lanzarError(res)
   return res.json()
+}
+
+/** Descarga un archivo de la API (GET con la cookie de sesión) con el nombre que manda el servidor. */
+async function descargar(url: string, nombrePorDefecto: string): Promise<void> {
+  let res: Response
+  try {
+    res = await fetch(url, { credentials: "include" })
+  } catch {
+    throw new ApiError(0, "Sin conexión con el servidor")
+  }
+  if (!res.ok) await lanzarError(res)
+  const nombre = /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? nombrePorDefecto
+  const href = URL.createObjectURL(await res.blob())
+  const a = document.createElement("a")
+  a.href = href
+  a.download = nombre
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(href), 1000)
 }
 
 export type TipoProceso = "EXTRAER_BAJAS" | "EXTRAER_CAMBIO_TEC" | "MORA" | "ASIGNACION"
@@ -115,10 +135,25 @@ export type EstadoControl = {
   insumos: EstadoInsumo[]
   mora: { proceso: Proceso | null; duracion_promedio_ms: number | null; programacion: Programacion | null }
   asignacion: { proceso: Proceso | null; duracion_promedio_ms: number | null }
+  /** Equipos con agencia NULL; null si la asignación del periodo aún no está generada */
+  sin_asignar: number | null
+  /** Periodo completado (cerrado): habilita la exportación y bloquea el paso 5 y Regenerar */
+  cierre: Cierre | null
+  bloqueos_completar: string[]
+  puede_completar: boolean
   bloqueos: string[]
   puede_generar: boolean
   bitacora: EventoBitacora[]
 }
+
+/** Equipo sin agencia: `_id` es el identificador; el resto son las columnas configuradas */
+export type EquipoSinAgencia = { _id: string } & Record<string, unknown>
+
+export type SinAsignar = { columnas: string[]; filas: EquipoSinAgencia[]; total: number }
+
+export type Cierre = { Periodo: string; Usuario: string; Fecha: string }
+
+export type Agencia = { valor: string; nombre: string }
 
 export type Resumen = {
   periodo: string
@@ -144,6 +179,13 @@ export const api = {
   mora: () => request<{ id: number }>("POST", "/api/control/mora"),
   asignacion: (regenerar = false) =>
     request<{ id: number }>("POST", `/api/control/asignacion${regenerar ? "?regenerar=true" : ""}`),
+  sinAsignar: () => request<SinAsignar>("GET", "/api/control/sin-asignar"),
+  agencias: () => request<Agencia[]>("GET", "/api/control/agencias"),
+  asignarAgencia: (ids: string[], agencia: string) =>
+    request<{ actualizados: number }>("POST", "/api/control/sin-asignar", { ids, agencia }),
+  completar: () => request<Cierre>("POST", "/api/control/completar"),
+  reabrir: () => request<{ ok: boolean }>("POST", "/api/control/reabrir"),
+  exportar: () => descargar("/api/control/exportar", "Asignacion.xlsx"),
   proceso: (id: number) => request<Proceso>("GET", `/api/control/procesos/${id}`),
   procesos: (tipo?: TipoProceso) =>
     request<Proceso[]>("GET", `/api/control/procesos${tipo ? `?tipo=${tipo}` : ""}`),

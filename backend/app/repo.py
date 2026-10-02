@@ -2,6 +2,7 @@
 y operaciones sobre los objetos de negocio (SPs e insumos)."""
 from datetime import datetime
 
+from .config import settings
 from .db import get_connection
 from .periodo import ahora
 
@@ -265,3 +266,87 @@ def ejecutar_sp(nombre: str, param: str, valor: str | None, timeout: int, on_spi
                 break
         conn.commit()
     return filas
+
+
+# ---------- Equipos sin agencia (toda la tabla de asignación) ----------
+
+def _sin_agencia() -> str:
+    return f"{settings.ASIGNACION_COLUMNA_AGENCIA} IS NULL"
+
+
+def sin_asignar_contar() -> int:
+    with get_connection() as conn:
+        return conn.cursor().execute(
+            f"SELECT COUNT_BIG(*) FROM {settings.ASIGNACION_TABLA} WHERE {_sin_agencia()}"
+        ).fetchval()
+
+
+def sin_asignar_listar(limite: int) -> tuple[list[str], list[dict]]:
+    """Devuelve (columnas visibles, filas). Cada fila trae además `_id` con el identificador del equipo."""
+    visibles = settings.ASIGNACION_COLUMNAS_VISIBLES.split(",")
+    with get_connection() as conn:
+        cur = conn.cursor().execute(
+            f"SELECT TOP ({int(limite)}) {settings.ASIGNACION_COLUMNA_ID} AS _id, {', '.join(visibles)} "
+            f"FROM {settings.ASIGNACION_TABLA} WHERE {_sin_agencia()} ORDER BY {settings.ASIGNACION_COLUMNA_ID}"
+        )
+        filas = _filas(cur)
+    return [c.strip("[]") for c in visibles], filas
+
+
+def agencias_listar() -> list[dict]:
+    with get_connection() as conn:
+        cur = conn.cursor().execute(
+            f"SELECT {settings.AGENCIAS_COLUMNA_VALOR} AS valor, {settings.AGENCIAS_COLUMNA_NOMBRE} AS nombre "
+            f"FROM {settings.AGENCIAS_TABLA} ORDER BY {settings.AGENCIAS_COLUMNA_NOMBRE}"
+        )
+        return [{"valor": str(r["valor"]).strip(), "nombre": str(r["nombre"]).strip()} for r in _filas(cur)]
+
+
+def asignar_agencia(ids: list[str], agencia: str) -> int:
+    """Pone la agencia a los equipos indicados que sigan sin agencia. Devuelve cuántos se actualizaron."""
+    total = 0
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for i in range(0, len(ids), 500):  # SQL Server admite ~2100 parámetros por consulta
+            bloque = ids[i:i + 500]
+            cur.execute(
+                f"UPDATE {settings.ASIGNACION_TABLA} SET {settings.ASIGNACION_COLUMNA_AGENCIA} = ? "
+                f"WHERE {_sin_agencia()} AND {settings.ASIGNACION_COLUMNA_ID} IN ({', '.join('?' for _ in bloque)})",
+                agencia, *bloque,
+            )
+            total += cur.rowcount
+        conn.commit()
+    return total
+
+
+def asignacion_exportar(on_columnas, on_filas) -> int:
+    """Recorre toda la tabla de asignación en bloques: on_columnas(nombres) y luego on_filas(lista) por bloque."""
+    total = 0
+    with get_connection() as conn:
+        cur = conn.cursor().execute(f"SELECT * FROM {settings.ASIGNACION_TABLA}")
+        on_columnas([c[0] for c in cur.description])
+        while filas := cur.fetchmany(5000):
+            on_filas(filas)
+            total += len(filas)
+    return total
+
+
+# ---------- Cierre del periodo ----------
+
+def cierre_get(periodo: str) -> dict | None:
+    with get_connection() as conn:
+        return _una(conn.cursor().execute(
+            "SELECT Periodo, Usuario, Fecha FROM dbo.AppCierres WHERE Periodo = ?", periodo))
+
+
+def cierre_crear(periodo: str, usuario: str) -> None:
+    with get_connection() as conn:
+        conn.cursor().execute(
+            "INSERT INTO dbo.AppCierres (Periodo, Usuario, Fecha) VALUES (?, ?, ?)", periodo, usuario, ahora())
+        conn.commit()
+
+
+def cierre_eliminar(periodo: str) -> None:
+    with get_connection() as conn:
+        conn.cursor().execute("DELETE FROM dbo.AppCierres WHERE Periodo = ?", periodo)
+        conn.commit()

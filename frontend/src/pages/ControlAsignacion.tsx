@@ -3,6 +3,8 @@ import { Loader2Icon } from "lucide-react"
 
 import { Bitacora } from "@/components/control/bitacora"
 import { EstadoBadge, type EstadoPaso } from "@/components/control/estado-badge"
+import { PasoCompletar } from "@/components/control/paso-completar"
+import { PasoSinAsignar } from "@/components/control/paso-sin-asignar"
 import {
   PasoAsignacion,
   PasoInsumo,
@@ -20,7 +22,12 @@ import { NOMBRE_PROCESO, nombrePeriodo } from "@/lib/formato"
 
 function estadoGeneral(c: EstadoControl): { estado: EstadoPaso; texto: string } {
   if (c.en_curso) return { estado: "EN_PROCESO", texto: `${NOMBRE_PROCESO[c.en_curso.Tipo]} en curso` }
-  if (c.asignacion.proceso?.Estado === "OK") return { estado: "OK", texto: "Asignación generada" }
+  if (c.cierre) return { estado: "OK", texto: "Asignación completada" }
+  if (c.asignacion.proceso?.Estado === "OK") {
+    return c.sin_asignar
+      ? { estado: "ADVERTENCIA", texto: `Pendiente: ${c.sin_asignar} equipo(s) sin agencia` }
+      : { estado: "OK", texto: "Lista para completar" }
+  }
   if (c.puede_generar) return { estado: "OK", texto: "Listo para generar" }
   return { estado: "ADVERTENCIA", texto: `Bloqueado: ${c.bloqueos[0]}` }
 }
@@ -53,8 +60,15 @@ export function ControlAsignacion() {
     )
   }
 
-  const pasos = [...c.insumos.map((i) => estadoInsumo(i, c)), estadoMora(c), estadoAsignacion(c)]
-  const completos = pasos.filter((e) => e === "OK" || e === "ADVERTENCIA").length
+  const listo = (e: EstadoPaso) => e === "OK" || e === "ADVERTENCIA"
+  const pasos = [
+    ...c.insumos.map((i) => listo(estadoInsumo(i, c))),
+    listo(estadoMora(c)),
+    listo(estadoAsignacion(c)),
+    c.sin_asignar === 0, // paso 5: sin equipos pendientes de agencia
+    !!c.cierre,
+  ]
+  const completos = pasos.filter(Boolean).length
   const general = estadoGeneral(c)
   const comunes = { control: c, desfaseMs, onCambio: recargar }
 
@@ -94,6 +108,8 @@ export function ControlAsignacion() {
           ))}
           <PasoMora numero={c.insumos.length + 1} {...comunes} />
           <PasoAsignacion numero={c.insumos.length + 2} {...comunes} />
+          <PasoSinAsignar numero={c.insumos.length + 3} control={c} onCambio={recargar} />
+          <PasoCompletar numero={c.insumos.length + 4} control={c} onCambio={recargar} />
         </ol>
         <Bitacora eventos={c.bitacora} />
       </div>

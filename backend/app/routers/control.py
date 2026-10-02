@@ -1,14 +1,20 @@
+import logging
+import os
 from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
-from .. import insumos, planificador, procesos, repo
+from .. import exportar, insumos, planificador, procesos, repo
 from ..config import settings
 from ..periodo import ahora, periodo_actual, periodo_insumos
 from ..security import get_current_user, require_csrf_header
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/control", tags=["control"], dependencies=[Depends(get_current_user)])
 csrf = [Depends(require_csrf_header)]
@@ -23,6 +29,22 @@ def _iniciar(tipo: str, usuario: str) -> dict:
     except procesos.ProcesoEnCurso:
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un proceso en curso; espera a que termine")
     return {"id": id_}
+
+
+MSG_CERRADA = "La asignación del periodo está completada; reábrela para hacer cambios"
+
+
+def _motivos_completar(asignacion: dict | None, sin_asignar: int | None, en_curso: dict | None) -> list[str]:
+    motivos = []
+    if not asignacion or asignacion["Estado"] != "OK":
+        motivos.append("La asignación no se ha generado en este periodo")
+    elif sin_asignar is None:
+        motivos.append("No se pudo revisar los equipos sin agencia")
+    elif sin_asignar:
+        motivos.append(f"Quedan {sin_asignar} equipo(s) sin agencia (paso 5)")
+    if en_curso:
+        motivos.append("Hay un proceso en curso")
+    return motivos
 
 
 # ---------- Estado del periodo ----------
@@ -60,6 +82,16 @@ def _estado() -> dict:
     if en_curso:
         bloqueos.append("Hay un proceso en curso")
 
+    asignacion = repo.proceso_ultimo(periodo, "ASIGNACION")
+    sin_asignar = None
+    if asignacion and asignacion["Estado"] == "OK":
+        try:
+            sin_asignar = repo.sin_asignar_contar()
+        except Exception:
+            logger.exception("No se pudo contar los equipos sin agencia")
+    cierre = repo.cierre_get(periodo)
+    bloqueos_completar = [] if cierre else _motivos_completar(asignacion, sin_asignar, en_curso)
+
     return {
         "periodo": periodo,
         "periodo_insumos": periodo_insumos(periodo),
@@ -72,9 +104,13 @@ def _estado() -> dict:
             "programacion": progs.get("MORA"),
         },
         "asignacion": {
-            "proceso": repo.proceso_ultimo(periodo, "ASIGNACION"),
+            "proceso": asignacion,
             "duracion_promedio_ms": repo.duracion_promedio("ASIGNACION"),
         },
+        "sin_asignar": sin_asignar,
+        "cierre": cierre,
+        "bloqueos_completar": bloqueos_completar,
+        "puede_completar": not cierre and not bloqueos_completar,
         "bloqueos": bloqueos,
         "puede_generar": not bloqueos,
         "bitacora": repo.bitacora_listar(periodo),
@@ -108,6 +144,8 @@ def _iniciar_asignacion(usuario: str, regenerar: bool) -> dict:
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un proceso en curso; espera a que termine")
 
     periodo = periodo_actual()
+    if repo.cierre_get(periodo):
+        raise HTTPException(status.HTTP_409_CONFLICT, MSG_CERRADA)
     motivos = []
     # Revalidar en el momento: no confiar en lo que muestra la pantalla
     for ins in insumos.INSUMOS.values():
@@ -132,6 +170,113 @@ def _iniciar_asignacion(usuario: str, regenerar: bool) -> dict:
 @router.post("/asignacion", status_code=202, dependencies=csrf)
 async def asignacion(regenerar: bool = False, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(_iniciar_asignacion, usuario, regenerar)
+
+
+# ---------- Equipos sin agencia ----------
+
+LIMITE_SIN_ASIGNAR = 5000
+
+
+def _sin_asignar() -> dict:
+    columnas, filas = repo.sin_asignar_listar(LIMITE_SIN_ASIGNAR)
+    for f in filas:
+        f["_id"] = str(f["_id"]).strip()
+    return {"columnas": columnas, "filas": filas, "total": repo.sin_asignar_contar()}
+
+
+@router.get("/sin-asignar")
+async def sin_asignar():
+    return await run_in_threadpool(_sin_asignar)
+
+
+@router.get("/agencias")
+async def agencias():
+    return await run_in_threadpool(repo.agencias_listar)
+
+
+class AsignarAgenciaIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=LIMITE_SIN_ASIGNAR)
+    agencia: str
+
+
+def _asignar_agencia(data: AsignarAgenciaIn, usuario: str) -> dict:
+    periodo = periodo_actual()
+    if repo.cierre_get(periodo):
+        raise HTTPException(status.HTTP_409_CONFLICT, MSG_CERRADA)
+    if repo.proceso_en_curso():
+        raise HTTPException(status.HTTP_409_CONFLICT, "Hay un proceso en curso; espera a que termine")
+    agencia = next((a for a in repo.agencias_listar() if a["valor"] == data.agencia), None)
+    if not agencia:
+        raise HTTPException(422, "La agencia no existe en el catálogo")
+
+    ids = list(dict.fromkeys(data.ids))
+    actualizados = repo.asignar_agencia(ids, agencia["valor"])
+    if actualizados:
+        repo.bitacora_add(periodo, usuario, "ok",
+                          f"Asignó la agencia {agencia['nombre']} a {actualizados} equipo(s) sin agencia")
+    if actualizados < len(ids):
+        repo.bitacora_add(periodo, usuario, "warn",
+                          f"{len(ids) - actualizados} equipo(s) no se actualizaron: ya tenían agencia o no existen")
+    return {"actualizados": actualizados}
+
+
+@router.post("/sin-asignar", dependencies=csrf)
+async def asignar_agencia(data: AsignarAgenciaIn, usuario: str = Depends(get_current_user)):
+    return await run_in_threadpool(_asignar_agencia, data, usuario)
+
+
+# ---------- Completar (cierre del periodo) y exportar ----------
+
+def _completar(usuario: str) -> dict:
+    periodo = periodo_actual()
+    if repo.cierre_get(periodo):
+        raise HTTPException(status.HTTP_409_CONFLICT, "La asignación de este periodo ya está completada")
+    # Revalidar en el servidor: no confiar en lo que muestra la pantalla
+    motivos = _motivos_completar(repo.proceso_ultimo(periodo, "ASIGNACION"), repo.sin_asignar_contar(),
+                                 repo.proceso_en_curso())
+    if motivos:
+        raise HTTPException(422, {"mensaje": "No se puede completar la asignación", "motivos": motivos})
+    repo.cierre_crear(periodo, usuario)
+    repo.bitacora_add(periodo, usuario, "ok", "Completó la asignación del periodo")
+    return repo.cierre_get(periodo)
+
+
+@router.post("/completar", dependencies=csrf)
+async def completar(usuario: str = Depends(get_current_user)):
+    return await run_in_threadpool(_completar, usuario)
+
+
+def _reabrir(usuario: str) -> dict:
+    periodo = periodo_actual()
+    if not repo.cierre_get(periodo):
+        raise HTTPException(status.HTTP_409_CONFLICT, "La asignación de este periodo no está completada")
+    repo.cierre_eliminar(periodo)
+    repo.bitacora_add(periodo, usuario, "warn", "Reabrió la asignación del periodo")
+    return {"ok": True}
+
+
+@router.post("/reabrir", dependencies=csrf)
+async def reabrir(usuario: str = Depends(get_current_user)):
+    return await run_in_threadpool(_reabrir, usuario)
+
+
+def _exportar(usuario: str) -> FileResponse:
+    periodo = periodo_actual()
+    if not repo.cierre_get(periodo):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Completa la asignación antes de exportarla")
+    ruta, filas = exportar.asignacion_xlsx()
+    repo.bitacora_add(periodo, usuario, "info", f"Exportó la asignación a Excel ({filas} filas)")
+    return FileResponse(
+        ruta,
+        filename=f"Asignacion_{periodo}.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        background=BackgroundTask(os.remove, ruta),
+    )
+
+
+@router.get("/exportar")
+async def exportar_excel(usuario: str = Depends(get_current_user)):
+    return await run_in_threadpool(_exportar, usuario)
 
 
 # ---------- Consultas ----------

@@ -17,12 +17,21 @@ Contexto del negocio y reglas: ver el [README raíz](../README.md). API: ver [ba
 ### Control de asignación
 
 - **Encabezado**: mes de la asignación, periodo esperado de los insumos, estado general (*Bloqueado: motivo* /
-  *Listo para generar* / *En curso* / *Asignación generada*) y barra "N de 4".
+  *Listo para generar* / *En curso* / *Pendiente: N equipos sin agencia* / *Lista para completar* /
+  *Asignación completada*) y barra "N de 6".
 - **Pasos** (`components/control/pasos.tsx`), cada uno dentro de `Paso` (`paso.tsx`):
   1–2. **Insumos** (`PasoInsumo`): periodo encontrado, filas, variación vs. periodo anterior, quién validó.
      Botones *Revalidar*, *Extraer del servidor* y *Programar*.
   3. **Mora** (`PasoMora`): *Ejecutar mora* / *Volver a ejecutar* y *Programar*.
-  4. **Asignación** (`PasoAsignacion`): deshabilitada con la lista de bloqueos; *Generar* o *Regenerar*.
+  4. **Asignación** (`PasoAsignacion`): deshabilitada con la lista de bloqueos; *Generar* o *Regenerar* (avisa que
+     se pierden las agencias asignadas a mano).
+  5. **Equipos sin asignar** (`paso-sin-asignar.tsx`): tabla de equipos con agencia NULL, buscador, combobox de
+     agencia por fila y barra de lote al marcar varios. Pendiente hasta que haya asignación; *Advertencia* "N sin
+     agencia" o *OK*. Cuenta como hecho con 0 pendientes. Dibuja máx. 100 filas (el resto, con el buscador).
+     Con el periodo completado queda en solo lectura.
+  6. **Completar asignación** (`paso-completar.tsx`): *Completar* (deshabilitado con `bloqueos_completar`); ya
+     completada muestra quién/cuándo, **Exportar a Excel** (`api.exportar`: fetch → blob → descarga) y *Reabrir*.
+     Con cierre, *Regenerar* del paso 4 queda deshabilitado.
 - **Proceso en curso** (`proceso-progreso.tsx`): cronómetro, barra estimada con el promedio de las últimas 5
   corridas OK, fin estimado y estado de la sesión SQL.
 - **Programación** (`programacion.tsx`): diálogo *Una vez* (fecha y hora) / *Cada mes* (día y hora), y la línea

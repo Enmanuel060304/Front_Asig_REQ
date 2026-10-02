@@ -35,7 +35,7 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 
 ```
 ① Bajas ──┐
-② Cambio de tecnología ──┼──► ④ Asignación ──► base para las empresas
+② Cambio de tecnología ──┼──► ④ Asignación ──► ⑤ Equipos sin asignar ──► ⑥ Completar ──► Excel para las empresas
 ③ Mora (~40 min) ──┘
 ```
 
@@ -43,7 +43,13 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 2. Si un insumo no tiene el periodo esperado → **Extraer del servidor** (o programar la extracción).
 3. Ejecutar o programar la **Mora**.
 4. Cuando los 3 insumos están OK se habilita **Generar asignación**.
-5. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
+5. **Equipos sin asignar**: el SP deja la agencia en `NULL` cuando los datos del equipo no cuadran (p. ej. un barrio
+   que no pertenece al municipio registrado). Aquí se listan y el usuario les asigna una agencia a mano, uno a uno o
+   varios a la vez, eligiendo del catálogo de agencias (tabla SQL, siempre las vigentes). Revisa **toda** la tabla
+   de asignación (lo nuevo y lo pendiente de periodos anteriores).
+6. **Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo y
+   entonces **Exportar a Excel** toda la tabla de asignación.
+7. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
 
 ### Reglas de negocio
 
@@ -57,6 +63,16 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 - **Mora OK** = el último proceso de mora del periodo terminó OK y la tabla de mora tiene filas.
 - **Extracciones programadas**: si al llegar la hora el insumo **ya** tiene el periodo correcto, la extracción se
   **omite** (no se recarga un insumo válido) y la tarjeta muestra "Último disparo: Omitida…". Decisión del negocio.
+- **Asignación manual de agencia**: solo se actualizan equipos que siguen con agencia `NULL` (no se pisa lo que
+  asignó otro usuario) y solo con agencias que existen en el catálogo (se valida en el servidor). **Se pierde al
+  regenerar** la asignación — decisión del negocio; la confirmación de *Regenerar* lo advierte. No se puede asignar
+  mientras corre un proceso (`409`).
+- **Completar (cierre del periodo)**: exige asignación OK en el periodo, **0 equipos sin agencia** y ningún proceso
+  en curso (se revalida en el servidor → `422` con motivos). Con el periodo completado se bloquean la asignación
+  manual y *Regenerar* (`409`); se puede **Reabrir** con confirmación. La exportación solo funciona con el periodo
+  completado.
+- **Excel**: una hoja con `SELECT *` de la tabla de asignación completa (ya viene trabajada por el SP: lo nuevo + los
+  pendientes de periodos anteriores), columnas tal cual. Cada exportación queda en bitácora.
 - **Programaciones vencidas**: si no pudieron ejecutarse dentro de `PROGRAMACION_TOLERANCIA_MIN` (120 min por
   defecto) — servidor apagado u otro proceso en curso — se registran como no ejecutadas.
 
@@ -75,7 +91,10 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
    - **Insumos** (Bajas y Cambio de tecnología): tabla donde se valida el periodo, columna del periodo (`YYYYMM`)
      y SP de extracción (opcionalmente con parámetro de periodo, p. ej. `@Periodo`)
    - **Mora**: `SP_MORA` y `MORA_TABLA`
-   - **Asignación**: `SP_ASIGNACION`
+   - **Asignación**: `SP_ASIGNACION`; y para el paso 5, la tabla que llena (`ASIGNACION_TABLA`), su columna
+     identificadora, la de agencia y las columnas a mostrar (se usa la tabla completa, también para el Excel)
+   - **Agencias**: `AGENCIAS_TABLA` (puede ser una vista que filtre las activas), columna del valor que se escribe y
+     columna del nombre visible
    - **Programación**: `APP_TIMEZONE` y `PROGRAMACION_TOLERANCIA_MIN`
    - `JWT_SECRET` — secreto largo y aleatorio (`python -c "import secrets; print(secrets.token_urlsafe(64))"`)
    - `COOKIE_SECURE=true` en producción (HTTPS)
@@ -85,9 +104,11 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 2. **Tablas de la app** — ejecuta en la base de datos, en orden:
    - `backend/sql/001_tablas_app.sql` (usuarios)
    - `backend/sql/002_control.sql` (procesos, validaciones, bitácora y programaciones)
+   - `backend/sql/003_cierre.sql` (periodos completados)
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
-   mora y asignación. Para ver el detalle en vivo de la sesión SQL mientras corre un proceso necesita además
+   mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación
+   (paso 5). Para ver el detalle en vivo de la sesión SQL mientras corre un proceso necesita además
    `VIEW SERVER STATE` (opcional).
 
 3. **Backend**
@@ -150,9 +171,8 @@ En Chrome/Edge aparece el ícono **Instalar app** en la barra de direcciones (o 
 
 ## Pendiente / ideas para siguientes fases
 
-1. **Exportar la base por empresa** (Excel/CSV) desde la app y marcar el periodo como "entregado".
+1. ~~Exportar la base a Excel y cerrar el periodo~~ (hecho: paso 6). Idea: una hoja o archivo por empresa.
 2. **Encadenar la asignación**: al terminar la mora OK y validar insumos, generar automáticamente.
 3. **Roles**: operador (ejecuta) vs. consulta (solo ve).
 4. **Avisos por correo/Teams** al terminar procesos o detectar insumos faltantes.
-5. **Cierre de periodo**: bloquear la regeneración una vez entregada la base.
-6. Probar contra la BD real: llenar `.env` con los nombres reales de tablas/SPs y validar por linked server.
+5. Probar contra la BD real: llenar `.env` con los nombres reales de tablas/SPs y validar por linked server.

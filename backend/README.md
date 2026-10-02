@@ -17,6 +17,7 @@ backend/
 │   ├── periodo.py       # Periodos YYYYMM, hora local (APP_TIMEZONE), próxima fecha mensual
 │   ├── repo.py          # TODO el SQL: tablas de la app + objetos de negocio (SPs, insumos)
 │   ├── insumos.py       # Definición de Bajas / Cambio de tecnología y su validación
+│   ├── exportar.py      # Tabla de asignación → .xlsx (openpyxl write_only)
 │   ├── procesos.py      # Ejecutor de procesos en segundo plano (un proceso a la vez)
 │   ├── planificador.py  # Hilo que dispara las programaciones vencidas cada 30 s
 │   └── routers/
@@ -25,7 +26,8 @@ backend/
 ├── scripts/create_user.py   # Crea/actualiza un usuario (hash bcrypt)
 ├── sql/
 │   ├── 001_tablas_app.sql   # AppUsuarios
-│   └── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
+│   ├── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
+│   └── 003_cierre.sql       # AppCierres
 ├── .env.example             # Plantilla documentada de configuración
 └── requirements.txt
 ```
@@ -89,6 +91,28 @@ Una programación por tipo (`MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC`), modo
 
 > Requiere **un solo worker** de uvicorn: con varios, cada worker tendría su propio planificador y su propio lock.
 
+## Equipos sin agencia (paso 5)
+
+`SP_ASIGNACION` deja `NULL` la agencia cuando los datos del equipo no cuadran. Funciones en `repo.py`:
+
+- `sin_asignar_contar` / `sin_asignar_listar`: `WHERE {ASIGNACION_COLUMNA_AGENCIA} IS NULL` sobre **toda** la tabla
+  (es lo mismo que se exporta). Columnas visibles de `ASIGNACION_COLUMNAS_VISIBLES`.
+- `agencias_listar`: `AGENCIAS_COLUMNA_VALOR` / `AGENCIAS_COLUMNA_NOMBRE` de `AGENCIAS_TABLA`.
+- `asignar_agencia`: `UPDATE … SET agencia = ? WHERE agencia IS NULL AND id IN (…)` en bloques de 500 ids (límite
+  de ~2100 parámetros de SQL Server), una transacción. El `IS NULL` evita pisar lo que asignó otro usuario.
+
+El router valida que la agencia exista en el catálogo y registra en bitácora cuántos equipos se actualizaron (y un
+`warn` si alguno ya tenía agencia). Con el periodo completado responde `409`.
+
+## Completar y exportar (paso 6)
+
+- `AppCierres` (una fila por periodo completado). `POST /completar` revalida con `_motivos_completar` (asignación OK,
+  `sin_asignar_contar() == 0`, sin proceso en curso) → `422 {mensaje, motivos}`; `POST /reabrir` borra la fila.
+- Con cierre: `POST /sin-asignar` y `POST /asignacion` → `409`.
+- `exportar.py`: `openpyxl` en modo `write_only` (memoria constante). `repo.asignacion_exportar` hace
+  `SELECT * FROM {ASIGNACION_TABLA}` y entrega filas en bloques de 5000. Encabezado en negrita, fila 1 congelada y
+  autofiltro. Se escribe a un temporal que se borra tras enviarlo (`FileResponse` + `BackgroundTask`).
+
 ## API
 
 Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritura exigen `X-Requested-With: XMLHttpRequest`.
@@ -98,7 +122,7 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | POST | `/api/auth/login` | `{username, password}` → pone la cookie `access_token` |
 | POST | `/api/auth/logout` | Borra la cookie |
 | GET | `/api/auth/me` | Usuario de la sesión (401 si no hay) |
-| GET | `/api/control` | Estado completo del periodo: insumos, mora, asignación, proceso en curso (con promedio y detalle SQL), bloqueos, `puede_generar`, bitácora |
+| GET | `/api/control` | Estado completo del periodo: insumos, mora, asignación, `sin_asignar` (equipos sin agencia; `null` si no hay asignación OK), `cierre`, `bloqueos_completar`, `puede_completar`, proceso en curso (con promedio y detalle SQL), bloqueos, `puede_generar`, bitácora |
 | POST | `/api/control/validar/{BAJAS\|CAMBIO_TEC}` | Valida un insumo |
 | POST | `/api/control/extraer/{BAJAS\|CAMBIO_TEC}` | Inicia la extracción (202, 409 si hay proceso) |
 | POST | `/api/control/mora` | Inicia la mora (202 / 409) |
@@ -109,6 +133,12 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | PUT | `/api/control/programaciones/{tipo}` | Crea/reemplaza: `{modo:"UNICA", fecha_hora}` o `{modo:"MENSUAL", dia_mes, hora:"HH:MM"}` |
 | PATCH | `/api/control/programaciones/{tipo}` | `{activa}` — pausar/reanudar |
 | DELETE | `/api/control/programaciones/{tipo}` | Eliminar |
+| POST | `/api/control/completar` | Cierra el periodo (409 si ya está, 422 con `{mensaje, motivos}`) |
+| POST | `/api/control/reabrir` | Reabre el periodo |
+| GET | `/api/control/exportar` | Descarga `Asignacion_YYYYMM.xlsx` (409 si el periodo no está completado) |
+| GET | `/api/control/sin-asignar` | Equipos con agencia NULL: `{columnas, filas (con _id), total}` (máx. 5000 filas) |
+| GET | `/api/control/agencias` | Catálogo `[{valor, nombre}]` |
+| POST | `/api/control/sin-asignar` | `{ids, agencia}` → `{actualizados}` (409 si hay proceso, 422 si la agencia no existe) |
 
 Documentación interactiva en `http://localhost:8000/docs`.
 
@@ -121,6 +151,7 @@ Documentación interactiva en `http://localhost:8000/docs`.
 | `AppValidaciones` | Cada validación de insumo: estado, periodo encontrado, filas, filas del periodo anterior, detalle |
 | `AppBitacora` | Eventos del periodo (nivel `info`/`ok`/`warn`/`error`, mensaje, usuario) |
 | `AppProgramaciones` | Una fila por tipo: modo, fecha/día/hora, activa, próxima ejecución, vencimiento original, último disparo y su resultado |
+| `AppCierres` | Periodos completados: periodo, usuario, fecha (`003_cierre.sql`) |
 
 Las fechas se guardan en **hora local** de `APP_TIMEZONE`, sin zona horaria. `002_control.sql` es idempotente
 (`IF OBJECT_ID … IS NULL`) e incluye un `ALTER` para columnas agregadas después.

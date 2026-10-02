@@ -231,18 +231,17 @@ export function PasoAsignacion({ numero, control, desfaseMs, onCambio }: Comunes
       titulo="Asignación"
       estado={estadoAsignacion(control)}
       etiquetaEstado={estadoAsignacion(control) === "OK" ? "Generada" : undefined}
-      ultimo
       acciones={
         <ConfirmarAccion
           id="tour-ejecutar"
           size="sm"
           variant={generada ? "outline" : "default"}
-          disabled={!control.puede_generar}
+          disabled={!control.puede_generar || !!control.cierre}
           destructiva={generada}
           titulo={generada ? "¿Regenerar la asignación?" : "¿Generar la asignación?"}
           descripcion={
             generada
-              ? `Ya existe una asignación generada para este periodo (${fmtFecha(proceso!.Fin ?? proceso!.Inicio)}). Regenerarla reemplazará la base que se envía a las empresas.`
+              ? `Ya existe una asignación generada para este periodo (${fmtFecha(proceso!.Fin ?? proceso!.Inicio)}). Regenerarla reemplazará la base que se envía a las empresas y se perderán las agencias asignadas manualmente en "Equipos sin asignar".`
               : "Se ejecutará el SP de asignación con los insumos validados. Los insumos se revalidan antes de iniciar."
           }
           textoConfirmar={generada ? "Regenerar" : "Generar"}
@@ -267,6 +266,9 @@ export function PasoAsignacion({ numero, control, desfaseMs, onCambio }: Comunes
       ) : proceso?.Estado === "ERROR" ? (
         <UltimoProceso proceso={proceso} etiqueta="La asignación" />
       ) : null}
+      {control.cierre && (
+        <p className="text-muted-foreground">La asignación está completada: reábrela en el paso 6 para regenerarla.</p>
+      )}
       {!corriendo && bloqueos.length > 0 && (
         <Alert>
           <AlertTitle>Se habilita cuando todos los insumos estén listos</AlertTitle>
