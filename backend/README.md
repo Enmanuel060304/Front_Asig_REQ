@@ -16,6 +16,7 @@ backend/
 │   ├── security.py      # bcrypt, JWT en cookie httpOnly, get_current_user, require_csrf_header
 │   ├── periodo.py       # Periodos YYYYMM, hora local (APP_TIMEZONE), próxima fecha mensual
 │   ├── repo.py          # TODO el SQL: tablas de la app + objetos de negocio (SPs, insumos)
+│   ├── repo_demo.py     # Misma interfaz que repo.py pero en memoria (modo demo, DEMO_MODE=true)
 │   ├── insumos.py       # Definición de Bajas / Cambio de tecnología y su validación
 │   ├── exportar.py      # Tabla de asignación → .xlsx (openpyxl write_only)
 │   ├── procesos.py      # Ejecutor de procesos en segundo plano (un proceso a la vez)
@@ -24,16 +25,25 @@ backend/
 │       ├── auth.py      # /api/auth: login, logout, me
 │       └── control.py   # /api/control: estado del periodo, acciones, historial, programaciones
 ├── scripts/create_user.py   # Crea/actualiza un usuario (hash bcrypt)
+├── scripts/demo.py          # Arranca el backend en modo demo (ENV_FILE=.env.demo) y abre el navegador
 ├── sql/
 │   ├── 001_tablas_app.sql   # AppUsuarios
 │   ├── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
 │   └── 003_cierre.sql       # AppCierres
 ├── .env.example             # Plantilla documentada de configuración
+├── .env.demo                # Configuración ficticia del modo demo (sí se versiona)
 └── requirements.txt
 ```
 
 **Regla de capas**: solo `repo.py` (y `routers/auth.py` para el login) escriben SQL. `insumos`, `procesos` y
 `planificador` llaman a `repo.*`, lo que permite reemplazar `repo` por una versión en memoria para probar sin BD.
+
+**Modo demo**: con `DEMO_MODE=true`, el final de `repo.py` hace `from .repo_demo import *` y todas las funciones
+públicas pasan a operar sobre estado en memoria (procesos, validaciones, bitácora, programaciones, cierre,
+asignación y agencias de ejemplo; `ejecutar_sp` simula el SP con una pausa). Incluye `usuario_hash` (login
+`demo`/`demo`). Si se agrega una función pública a `repo.py`, hay que agregarla también a `repo_demo.py` (y a su
+`__all__`). `GET /api/auth/config` (pública) informa `{demo}` al front. Se arranca con `npm run demo` (compila el front y lo sirve en :8000; una sola terminal) o `npm run dev:demo` (solo backend, para usar con `dev:front`)
+(`ENV_FILE=.env.demo`, que también permite elegir otro archivo de entorno).
 
 ## Procesos en segundo plano (`procesos.py`)
 
@@ -122,6 +132,7 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | POST | `/api/auth/login` | `{username, password}` → pone la cookie `access_token` |
 | POST | `/api/auth/logout` | Borra la cookie |
 | GET | `/api/auth/me` | Usuario de la sesión (401 si no hay) |
+| GET | `/api/auth/config` | Pública: `{demo}` (el front muestra la etiqueta de modo demo) |
 | GET | `/api/control` | Estado completo del periodo: insumos, mora, asignación, `sin_asignar` (equipos sin agencia; `null` si no hay asignación OK), `cierre`, `bloqueos_completar`, `puede_completar`, proceso en curso (con promedio y detalle SQL), bloqueos, `puede_generar`, bitácora |
 | POST | `/api/control/validar/{BAJAS\|CAMBIO_TEC}` | Valida un insumo |
 | POST | `/api/control/extraer/{BAJAS\|CAMBIO_TEC}` | Inicia la extracción (202, 409 si hay proceso) |

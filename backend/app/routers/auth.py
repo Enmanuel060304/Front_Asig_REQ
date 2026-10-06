@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from ..db import get_connection
+from .. import repo
+from ..config import settings
 from ..security import (
     clear_auth_cookie,
     create_token,
@@ -20,17 +21,9 @@ class LoginIn(BaseModel):
     password: str
 
 
-def _buscar_hash(username: str) -> str | None:
-    with get_connection() as conn:
-        row = conn.cursor().execute(
-            "SELECT PasswordHash FROM dbo.AppUsuarios WHERE Username = ? AND Activo = 1", username
-        ).fetchone()
-    return row[0] if row else None
-
-
 @router.post("/login", dependencies=[Depends(require_csrf_header)])
 async def login(data: LoginIn, response: Response):
-    hashed = await run_in_threadpool(_buscar_hash, data.username)
+    hashed = await run_in_threadpool(repo.usuario_hash, data.username)
     if not hashed or not verify_password(data.password, hashed):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuario o contraseña incorrectos")
     set_auth_cookie(response, create_token(data.username))
@@ -46,3 +39,9 @@ def logout(response: Response):
 @router.get("/me")
 def me(username: str = Depends(get_current_user)):
     return {"username": username}
+
+
+@router.get("/config")
+def config():
+    """Pública: el front la lee antes del login para avisar que es el modo demo."""
+    return {"demo": settings.DEMO_MODE}

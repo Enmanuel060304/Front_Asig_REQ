@@ -70,6 +70,8 @@ src/
   hora del servidor.
 - **Confirmaciones** (`control/confirmar-accion.tsx`): todo proceso o borrado pide confirmación. Cerrar sesión
   también (`nav-user.tsx`).
+- **Modo demo**: `AuthContext` lee `/api/auth/config`; con `demo` el login indica las credenciales y el header muestra
+  la etiqueta *Modo demo*.
 - **Tema**: `next-themes` con `defaultTheme="system"` (sigue al navegador) y selector Claro/Oscuro/Sistema en el header.
 - **Tour** (`tour/tour.ts`): se lanza solo la primera vez (`localStorage`) y desde *Ayuda*. Solo muestra los pasos
   cuyos elementos existen en la vista actual. Los anclajes son ids `tour-*` en los componentes.
@@ -88,6 +90,7 @@ src/
 
 ```bash
 npm run dev      # http://localhost:5173, proxy /api → http://localhost:8000
+npm run demo     # (desde la raíz) build + backend demo en :8000, abre el navegador
 npm run build    # tsc -b + vite build → dist/ (lo sirve FastAPI en producción)
 npm run lint     # oxlint
 ```

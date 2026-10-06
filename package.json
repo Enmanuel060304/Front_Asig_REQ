@@ -7,6 +7,8 @@
   "scripts": {
     "dev:front": "npm run dev -w frontend",
     "dev:back": "cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --port 8000",
+    "demo": "npm run build && npm run dev:demo",
+    "dev:demo": "cd backend && .venv\\Scripts\\python -m scripts.demo",
     "build": "npm run build -w frontend",
     "start": "cd backend && .venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
   }

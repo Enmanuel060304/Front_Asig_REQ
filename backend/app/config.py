@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,7 +15,7 @@ _PARAM_SQL = r"(@\w+)?"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=BASE_DIR / os.getenv("ENV_FILE", ".env"), env_file_encoding="utf-8")
 
     # SQL Server
     DB_SERVER: str
@@ -70,6 +71,7 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
 
     # App
+    DEMO_MODE: bool = False  # True = repo en memoria con datos ficticios, sin SQL Server
     FRONTEND_ORIGIN: str = "http://localhost:5173"
 
     @field_validator("BAJAS_TABLA", "CAMBIO_TEC_TABLA", "MORA_TABLA",

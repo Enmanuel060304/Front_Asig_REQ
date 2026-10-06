@@ -133,6 +133,26 @@ npm run dev:back    # FastAPI en http://localhost:8000 (docs en /docs)
 npm run dev:front   # Vite en http://localhost:5173 (proxy /api → :8000)
 ```
 
+## Modo demo (sin SQL Server)
+
+Para presentar o probar la app sin base de datos ni ODBC:
+
+```bash
+npm run demo        # compila el front, levanta todo en :8000 y abre el navegador (una sola terminal)
+```
+
+Para desarrollar el front con recarga en caliente: `npm run dev:demo` + `npm run dev:front` (en otra terminal) y abrir `:5173`.
+
+Usuario **`demo`** / contraseña **`demo`**. Usa `backend/.env.demo` (no hace falta `backend/.env`) y muestra la
+etiqueta **Modo demo** en el header.
+
+- **Qué está simulado**: todo lo que toca SQL (`backend/app/repo_demo.py` reemplaza a `repo.py` con `DEMO_MODE=true`).
+  Los SPs "tardan" segundos (extracción ~5 s, mora ~20 s, asignación ~5 s; constantes `PAUSA` en `repo_demo.py`).
+- **Punto de partida**: Bajas está en el periodo anterior (Error → hay que extraer; al extraer queda en *Advertencia*
+  por la variación), Cambio de tecnología está OK y la Mora vacía. La asignación genera 60 equipos, 14 sin agencia.
+- La lógica real (un proceso a la vez, revalidaciones, completar, Excel, programaciones) corre igual sobre ese estado.
+- El estado vive en memoria: se reinicia al reiniciar el backend. No usar en producción.
+
 ## Producción
 
 ```bash

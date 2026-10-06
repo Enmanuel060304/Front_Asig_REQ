@@ -172,6 +172,7 @@ export const api = {
     request<{ username: string }>("POST", "/api/auth/login", { username, password }),
   logout: () => request<{ ok: boolean }>("POST", "/api/auth/logout"),
   me: () => request<{ username: string }>("GET", "/api/auth/me"),
+  config: () => request<{ demo: boolean }>("GET", "/api/auth/config"),
 
   control: () => request<EstadoControl>("GET", "/api/control"),
   validar: (insumo: InsumoClave) => request<Validacion>("POST", `/api/control/validar/${insumo}`),

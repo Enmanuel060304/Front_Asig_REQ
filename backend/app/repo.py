@@ -350,3 +350,18 @@ def cierre_eliminar(periodo: str) -> None:
     with get_connection() as conn:
         conn.cursor().execute("DELETE FROM dbo.AppCierres WHERE Periodo = ?", periodo)
         conn.commit()
+
+
+# ---------- Usuarios ----------
+
+def usuario_hash(username: str) -> str | None:
+    with get_connection() as conn:
+        row = conn.cursor().execute(
+            "SELECT PasswordHash FROM dbo.AppUsuarios WHERE Username = ? AND Activo = 1", username
+        ).fetchone()
+    return row[0] if row else None
+
+
+# Modo demo: sin SQL Server, las funciones públicas se reemplazan por las de repo_demo (en memoria)
+if settings.DEMO_MODE:
+    from .repo_demo import *  # noqa: F401,F403,E402

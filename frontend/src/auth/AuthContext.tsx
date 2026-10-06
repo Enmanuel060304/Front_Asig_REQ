@@ -5,6 +5,7 @@ import { api } from "@/lib/api"
 type AuthState = {
   user: string | null
   loading: boolean
+  demo: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
@@ -14,6 +15,7 @@ const AuthContext = React.createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [demo, setDemo] = React.useState(false)
 
   React.useEffect(() => {
     api
@@ -21,6 +23,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then((r) => setUser(r.username))
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
+  }, [])
+
+  React.useEffect(() => {
+    api.config().then((c) => setDemo(c.demo)).catch(() => {})
   }, [])
 
   const login = React.useCallback(async (username: string, password: string) => {
@@ -33,7 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null)
   }, [])
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, demo, login, logout }}>{children}</AuthContext.Provider>
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 export function Login() {
-  const { login } = useAuth()
+  const { login, demo } = useAuth()
   const [error, setError] = React.useState<string | null>(null)
   const [enviando, setEnviando] = React.useState(false)
 
@@ -37,7 +37,9 @@ export function Login() {
         <Card>
           <CardHeader>
             <CardTitle>Iniciar sesión</CardTitle>
-            <CardDescription>Ingresa tus credenciales para continuar</CardDescription>
+            <CardDescription>
+              {demo ? "Modo demo: usuario demo, contraseña demo" : "Ingresa tus credenciales para continuar"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="flex flex-col gap-4">
