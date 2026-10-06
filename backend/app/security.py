@@ -27,10 +27,11 @@ def create_token(username: str) -> str:
 
 
 def set_auth_cookie(response: Response, token: str) -> None:
+    # Sin max_age/expires: cookie de sesión, el navegador la borra al cerrarse. El token igual vence a los
+    # JWT_EXPIRE_MINUTES (límite del lado del servidor).
     response.set_cookie(
         COOKIE_NAME,
         token,
-        max_age=settings.JWT_EXPIRE_MINUTES * 60,
         httponly=True,
         secure=settings.COOKIE_SECURE,
         samesite="strict",

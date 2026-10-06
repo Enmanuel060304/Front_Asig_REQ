@@ -160,6 +160,9 @@ etiqueta **Modo demo** en el header.
   por la variación), Cambio de tecnología está OK y la Mora vacía. La asignación genera 60 equipos, 14 sin agencia (las asignadas a mano se reaplican al regenerar).
 - La lógica real (un proceso a la vez, revalidaciones, completar, Excel, programaciones) corre igual sobre ese estado.
 - El estado vive en memoria: se reinicia al reiniciar el backend. No usar en producción.
+- Si `npm run demo` avisa que el puerto 8000 está en uso, hay una demo anterior viva (en Windows, Ctrl+C con
+  `reload` puede dejar procesos de Python huérfanos y el navegador abriría la versión vieja). Ciérrala con
+  `Stop-Process -Id (Get-NetTCPConnection -LocalPort 8000 -State Listen).OwningProcess` (PowerShell).
 
 ## Producción
 
@@ -175,7 +178,10 @@ En Chrome/Edge aparece el ícono **Instalar app** en la barra de direcciones (o 
 
 ## Seguridad
 
-- El token JWT viaja solo en una cookie `httpOnly; SameSite=Strict` (inaccesible desde JS).
+- El token JWT viaja solo en una cookie `httpOnly; SameSite=Strict` (inaccesible desde JS). La cookie es **de
+  sesión** (sin `Max-Age`): el navegador la borra al cerrarse y hay que volver a iniciar sesión. Además el token
+  vence a los `JWT_EXPIRE_MINUTES`. Ojo: si el navegador restaura las pestañas al abrirse ("continuar donde lo
+  dejé"), también puede conservar las cookies de sesión.
 - Los POST/PUT/PATCH/DELETE exigen el header `X-Requested-With` (protección CSRF adicional).
 - Los nombres de tablas y SPs solo se leen de `.env` (validados con regex); el cliente nunca los envía.
 - Cada proceso, validación y programación queda registrado en la bitácora del periodo, con el usuario.
