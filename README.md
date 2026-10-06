@@ -42,11 +42,13 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 1. Al abrir **Control de asignación** se validan los insumos que aún no se validaron en el periodo.
 2. Si un insumo no tiene el periodo esperado → **Extraer del servidor** (o programar la extracción).
 3. Ejecutar o programar la **Mora**.
-4. Cuando los 3 insumos están OK se habilita **Generar asignación**.
+4. Cuando los 3 insumos están OK el periodo queda *pendiente de aprobación*: una persona pulsa **Aprobar y
+   generar** (no se genera sola).
 5. **Equipos sin asignar**: el SP deja la agencia en `NULL` cuando los datos del equipo no cuadran (p. ej. un barrio
    que no pertenece al municipio registrado). Aquí se listan y el usuario les asigna una agencia a mano, uno a uno o
    varios a la vez, eligiendo del catálogo de agencias (tabla SQL, siempre las vigentes). Revisa **toda** la tabla
-   de asignación (lo nuevo y lo pendiente de periodos anteriores).
+   de asignación (lo nuevo y lo pendiente de periodos anteriores). La vista *Asignados a mano* permite corregir una
+   asignación; se conservan al regenerar.
 6. **Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo y
    entonces **Exportar a Excel** toda la tabla de asignación.
 7. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
@@ -63,10 +65,15 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 - **Mora OK** = el último proceso de mora del periodo terminó OK y la tabla de mora tiene filas.
 - **Extracciones programadas**: si al llegar la hora el insumo **ya** tiene el periodo correcto, la extracción se
   **omite** (no se recarga un insumo válido) y la tarjeta muestra "Último disparo: Omitida…". Decisión del negocio.
-- **Asignación manual de agencia**: solo se actualizan equipos que siguen con agencia `NULL` (no se pisa lo que
-  asignó otro usuario) y solo con agencias que existen en el catálogo (se valida en el servidor). **Se pierde al
-  regenerar** la asignación — decisión del negocio; la confirmación de *Regenerar* lo advierte. No se puede asignar
-  mientras corre un proceso (`409`).
+- **Aprobación para generar**: cuando los 3 insumos quedan OK (y no hay asignación generada) el periodo queda
+  *Pendiente de aprobación*: se deja constancia en la bitácora, se avisa en pantalla y una persona pulsa *Aprobar y
+  generar*. La asignación nunca se genera sola.
+- **Asignación manual de agencia**: solo se actualizan equipos con agencia `NULL` o que ya se asignaron a mano en
+  el periodo (para **corregirlos**); lo que puso el SP no se pisa. Solo con agencias del catálogo (se valida en el
+  servidor). Cada cambio queda en `AppAsignacionesManuales` (agencia anterior y nueva, usuario, fecha). **Se
+  conservan al regenerar**: al terminar el SP se reaplican a los equipos que sigan sin agencia; los que el SP ya
+  asignó se respetan y la bitácora informa cuántas se reaplicaron. Pendiente de confirmar con el negocio: antes
+  se perdían al regenerar. No se puede asignar mientras corre un proceso (`409`) ni con el periodo completado.
 - **Completar (cierre del periodo)**: exige asignación OK en el periodo, **0 equipos sin agencia** y ningún proceso
   en curso (se revalida en el servidor → `422` con motivos). Con el periodo completado se bloquean la asignación
   manual y *Regenerar* (`409`); se puede **Reabrir** con confirmación. La exportación solo funciona con el periodo
@@ -105,6 +112,7 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
    - `backend/sql/001_tablas_app.sql` (usuarios)
    - `backend/sql/002_control.sql` (procesos, validaciones, bitácora y programaciones)
    - `backend/sql/003_cierre.sql` (periodos completados)
+   - `backend/sql/004_asignaciones_manuales.sql` (historial de agencias asignadas a mano)
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
    mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación
@@ -149,7 +157,7 @@ etiqueta **Modo demo** en el header.
 - **Qué está simulado**: todo lo que toca SQL (`backend/app/repo_demo.py` reemplaza a `repo.py` con `DEMO_MODE=true`).
   Los SPs "tardan" segundos (extracción ~5 s, mora ~20 s, asignación ~5 s; constantes `PAUSA` en `repo_demo.py`).
 - **Punto de partida**: Bajas está en el periodo anterior (Error → hay que extraer; al extraer queda en *Advertencia*
-  por la variación), Cambio de tecnología está OK y la Mora vacía. La asignación genera 60 equipos, 14 sin agencia.
+  por la variación), Cambio de tecnología está OK y la Mora vacía. La asignación genera 60 equipos, 14 sin agencia (las asignadas a mano se reaplican al regenerar).
 - La lógica real (un proceso a la vez, revalidaciones, completar, Excel, programaciones) corre igual sobre ese estado.
 - El estado vive en memoria: se reinicia al reiniciar el backend. No usar en producción.
 
@@ -192,7 +200,8 @@ En Chrome/Edge aparece el ícono **Instalar app** en la barra de direcciones (o 
 ## Pendiente / ideas para siguientes fases
 
 1. ~~Exportar la base a Excel y cerrar el periodo~~ (hecho: paso 6). Idea: una hoja o archivo por empresa.
-2. **Encadenar la asignación**: al terminar la mora OK y validar insumos, generar automáticamente.
+2. ~~Encadenar la asignación~~ (hecho con aprobación: aviso al completar los insumos + *Aprobar y generar*). Idea:
+   disparar la validación/extracción de insumos también de forma encadenada.
 3. **Roles**: operador (ejecuta) vs. consulta (solo ve).
 4. **Avisos por correo/Teams** al terminar procesos o detectar insumos faltantes.
 5. Probar contra la BD real: llenar `.env` con los nombres reales de tablas/SPs y validar por linked server.

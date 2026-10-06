@@ -28,7 +28,7 @@ function estadoGeneral(c: EstadoControl): { estado: EstadoPaso; texto: string } 
       ? { estado: "ADVERTENCIA", texto: `Pendiente: ${c.sin_asignar} equipo(s) sin agencia` }
       : { estado: "OK", texto: "Lista para completar" }
   }
-  if (c.puede_generar) return { estado: "OK", texto: "Listo para generar" }
+  if (c.puede_generar) return { estado: "OK", texto: "Pendiente de aprobación para generar" }
   return { estado: "ADVERTENCIA", texto: `Bloqueado: ${c.bloqueos[0]}` }
 }
 

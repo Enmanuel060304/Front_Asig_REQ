@@ -143,11 +143,14 @@ export type EstadoControl = {
   puede_completar: boolean
   bloqueos: string[]
   puede_generar: boolean
+  /** Insumos listos y asignación sin generar: espera que una persona la apruebe */
+  pendiente_aprobacion: boolean
   bitacora: EventoBitacora[]
 }
 
-/** Equipo sin agencia: `_id` es el identificador; el resto son las columnas configuradas */
-export type EquipoSinAgencia = { _id: string } & Record<string, unknown>
+/** Equipo sin agencia: `_id` es el identificador; el resto son las columnas configuradas.
+ *  `_agencia` solo viene en "asignados a mano" (agencia actual). */
+export type EquipoSinAgencia = { _id: string; _agencia?: string | null } & Record<string, unknown>
 
 export type SinAsignar = { columnas: string[]; filas: EquipoSinAgencia[]; total: number }
 
@@ -181,6 +184,7 @@ export const api = {
   asignacion: (regenerar = false) =>
     request<{ id: number }>("POST", `/api/control/asignacion${regenerar ? "?regenerar=true" : ""}`),
   sinAsignar: () => request<SinAsignar>("GET", "/api/control/sin-asignar"),
+  asignadosManual: () => request<SinAsignar>("GET", "/api/control/asignados-manual"),
   agencias: () => request<Agencia[]>("GET", "/api/control/agencias"),
   asignarAgencia: (ids: string[], agencia: string) =>
     request<{ actualizados: number }>("POST", "/api/control/sin-asignar", { ids, agencia }),

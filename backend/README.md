@@ -29,7 +29,8 @@ backend/
 ├── sql/
 │   ├── 001_tablas_app.sql   # AppUsuarios
 │   ├── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
-│   └── 003_cierre.sql       # AppCierres
+│   ├── 003_cierre.sql       # AppCierres
+│   └── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
 ├── .env.example             # Plantilla documentada de configuración
 ├── .env.demo                # Configuración ficticia del modo demo (sí se versiona)
 └── requirements.txt
@@ -108,11 +109,24 @@ Una programación por tipo (`MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC`), modo
 - `sin_asignar_contar` / `sin_asignar_listar`: `WHERE {ASIGNACION_COLUMNA_AGENCIA} IS NULL` sobre **toda** la tabla
   (es lo mismo que se exporta). Columnas visibles de `ASIGNACION_COLUMNAS_VISIBLES`.
 - `agencias_listar`: `AGENCIAS_COLUMNA_VALOR` / `AGENCIAS_COLUMNA_NOMBRE` de `AGENCIAS_TABLA`.
-- `asignar_agencia`: `UPDATE … SET agencia = ? WHERE agencia IS NULL AND id IN (…)` en bloques de 500 ids (límite
-  de ~2100 parámetros de SQL Server), una transacción. El `IS NULL` evita pisar lo que asignó otro usuario.
+- `asignar_agencia(ids, agencia, periodo, usuario)`: en bloques de 500 ids (límite de ~2100 parámetros de SQL
+  Server), una transacción. Primero lee (`UPDLOCK`) los equipos que **siguen con agencia `NULL` o ya se asignaron a
+  mano en el periodo con otra agencia**; solo esos se actualizan (lo que puso el SP no se pisa) y cada cambio se
+  inserta en `AppAsignacionesManuales` con la agencia anterior.
+- `asignados_manual_listar`: equipos con asignación manual en el periodo (con `_agencia` actual), para corregirlos.
+- `asignaciones_reaplicar(periodo)`: tras **regenerar**, `procesos.py` la llama antes de marcar el proceso como
+  terminado: pone la última agencia manual de cada equipo que el SP dejó en `NULL` y devuelve
+  `(reaplicadas, total)`; el resto (el SP ya les asignó agencia o ya no están) se informa en bitácora.
 
 El router valida que la agencia exista en el catálogo y registra en bitácora cuántos equipos se actualizaron (y un
-`warn` si alguno ya tenía agencia). Con el periodo completado responde `409`.
+`warn` si alguno no cambió). Con el periodo completado responde `409`.
+
+## Aprobación para generar
+
+`GET /api/control` devuelve `pendiente_aprobacion` = no hay bloqueos, no hay asignación OK y el periodo no está
+completado. Al terminar una extracción o la mora, `procesos._avisar_si_listo` deja un evento en bitácora cuando los
+insumos quedan completos. `insumos.bloqueos_generar` concentra las reglas (validaciones + mora) que usan el estado y
+ese aviso. La generación sigue siendo manual (`POST /asignacion`, que revalida en el servidor).
 
 ## Completar y exportar (paso 6)
 
@@ -133,7 +147,7 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | POST | `/api/auth/logout` | Borra la cookie |
 | GET | `/api/auth/me` | Usuario de la sesión (401 si no hay) |
 | GET | `/api/auth/config` | Pública: `{demo}` (el front muestra la etiqueta de modo demo) |
-| GET | `/api/control` | Estado completo del periodo: insumos, mora, asignación, `sin_asignar` (equipos sin agencia; `null` si no hay asignación OK), `cierre`, `bloqueos_completar`, `puede_completar`, proceso en curso (con promedio y detalle SQL), bloqueos, `puede_generar`, bitácora |
+| GET | `/api/control` | Estado completo del periodo: insumos, mora, asignación, `sin_asignar` (equipos sin agencia; `null` si no hay asignación OK), `cierre`, `bloqueos_completar`, `puede_completar`, proceso en curso (con promedio y detalle SQL), bloqueos, `puede_generar`, `pendiente_aprobacion`, bitácora |
 | POST | `/api/control/validar/{BAJAS\|CAMBIO_TEC}` | Valida un insumo |
 | POST | `/api/control/extraer/{BAJAS\|CAMBIO_TEC}` | Inicia la extracción (202, 409 si hay proceso) |
 | POST | `/api/control/mora` | Inicia la mora (202 / 409) |
@@ -148,8 +162,9 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | POST | `/api/control/reabrir` | Reabre el periodo |
 | GET | `/api/control/exportar` | Descarga `Asignacion_YYYYMM.xlsx` (409 si el periodo no está completado) |
 | GET | `/api/control/sin-asignar` | Equipos con agencia NULL: `{columnas, filas (con _id), total}` (máx. 5000 filas) |
+| GET | `/api/control/asignados-manual` | Equipos asignados a mano en el periodo: `{columnas, filas (con _id y _agencia), total}` |
 | GET | `/api/control/agencias` | Catálogo `[{valor, nombre}]` |
-| POST | `/api/control/sin-asignar` | `{ids, agencia}` → `{actualizados}` (409 si hay proceso, 422 si la agencia no existe) |
+| POST | `/api/control/sin-asignar` | `{ids, agencia}` → `{actualizados}`: asigna o corrige (409 si hay proceso o periodo completado, 422 si la agencia no existe) |
 
 Documentación interactiva en `http://localhost:8000/docs`.
 
@@ -163,6 +178,7 @@ Documentación interactiva en `http://localhost:8000/docs`.
 | `AppBitacora` | Eventos del periodo (nivel `info`/`ok`/`warn`/`error`, mensaje, usuario) |
 | `AppProgramaciones` | Una fila por tipo: modo, fecha/día/hora, activa, próxima ejecución, vencimiento original, último disparo y su resultado |
 | `AppCierres` | Periodos completados: periodo, usuario, fecha (`003_cierre.sql`) |
+| `AppAsignacionesManuales` | Historial de agencias asignadas a mano: periodo, equipo, agencia anterior/nueva, usuario, fecha; la vigente es la de `Id` mayor (`004_asignaciones_manuales.sql`) |
 
 Las fechas se guardan en **hora local** de `APP_TIMEZONE`, sin zona horaria. `002_control.sql` es idempotente
 (`IF OBJECT_ID … IS NULL`) e incluye un `ALTER` para columnas agregadas después.

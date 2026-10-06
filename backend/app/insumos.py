@@ -38,6 +38,22 @@ def es_valida(validacion: dict | None) -> bool:
     return bool(validacion) and validacion["Estado"] in ESTADOS_VALIDOS
 
 
+def bloqueos_generar(validaciones: dict[str, dict | None], mora: dict | None) -> list[str]:
+    """Motivos por los que aún no se puede generar la asignación (sin contar si hay un proceso en curso)."""
+    bloqueos = []
+    for ins in INSUMOS.values():
+        v = validaciones.get(ins.clave)
+        if not v:
+            bloqueos.append(f"{ins.nombre}: sin validar")
+        elif not es_valida(v):
+            bloqueos.append(f"{ins.nombre}: {v['Detalle']}")
+    if not mora or mora["Estado"] != "OK":
+        bloqueos.append("Mora: no se ha generado en este periodo")
+    elif not mora["Filas"]:
+        bloqueos.append("Mora: la tabla quedó vacía")
+    return bloqueos
+
+
 def validar(clave: str, usuario: str) -> dict:
     """Consulta la tabla del insumo, registra el resultado y lo devuelve."""
     ins = INSUMOS[clave]

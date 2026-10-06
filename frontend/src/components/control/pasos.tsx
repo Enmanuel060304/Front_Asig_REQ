@@ -241,14 +241,14 @@ export function PasoAsignacion({ numero, control, desfaseMs, onCambio }: Comunes
           titulo={generada ? "¿Regenerar la asignación?" : "¿Generar la asignación?"}
           descripcion={
             generada
-              ? `Ya existe una asignación generada para este periodo (${fmtFecha(proceso!.Fin ?? proceso!.Inicio)}). Regenerarla reemplazará la base que se envía a las empresas y se perderán las agencias asignadas manualmente en "Equipos sin asignar".`
-              : "Se ejecutará el SP de asignación con los insumos validados. Los insumos se revalidan antes de iniciar."
+              ? `Ya existe una asignación generada para este periodo (${fmtFecha(proceso!.Fin ?? proceso!.Inicio)}). Regenerarla reemplazará la base que se envía a las empresas. Las agencias asignadas a mano en "Equipos sin asignar" se vuelven a aplicar a los equipos que sigan sin agencia.`
+              : "Los insumos están validados. Al aprobar se ejecutará el SP de asignación; los insumos se revalidan antes de iniciar."
           }
-          textoConfirmar={generada ? "Regenerar" : "Generar"}
+          textoConfirmar={generada ? "Regenerar" : "Aprobar y generar"}
           onConfirmar={() => lanzar("Asignación", () => api.asignacion(generada), onCambio)}
         >
           {generada ? <RotateCcwIcon /> : <PlayIcon />}
-          {generada ? "Regenerar" : "Generar asignación"}
+          {generada ? "Regenerar" : control.pendiente_aprobacion ? "Aprobar y generar" : "Generar asignación"}
         </ConfirmarAccion>
       }
     >
@@ -268,6 +268,15 @@ export function PasoAsignacion({ numero, control, desfaseMs, onCambio }: Comunes
       ) : null}
       {control.cierre && (
         <p className="text-muted-foreground">La asignación está completada: reábrela en el paso 6 para regenerarla.</p>
+      )}
+      {!corriendo && control.pendiente_aprobacion && (
+        <Alert>
+          <AlertTitle>Pendiente de aprobación</AlertTitle>
+          <AlertDescription>
+            Los insumos del periodo están completos. Revisa las validaciones (y las advertencias, si las hay) y aprueba
+            para generar la asignación.
+          </AlertDescription>
+        </Alert>
       )}
       {!corriendo && bloqueos.length > 0 && (
         <Alert>

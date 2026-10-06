@@ -23,12 +23,14 @@ Contexto del negocio y reglas: ver el [README raíz](../README.md). API: ver [ba
   1–2. **Insumos** (`PasoInsumo`): periodo encontrado, filas, variación vs. periodo anterior, quién validó.
      Botones *Revalidar*, *Extraer del servidor* y *Programar*.
   3. **Mora** (`PasoMora`): *Ejecutar mora* / *Volver a ejecutar* y *Programar*.
-  4. **Asignación** (`PasoAsignacion`): deshabilitada con la lista de bloqueos; *Generar* o *Regenerar* (avisa que
-     se pierden las agencias asignadas a mano).
-  5. **Equipos sin asignar** (`paso-sin-asignar.tsx`): tabla de equipos con agencia NULL, buscador, combobox de
-     agencia por fila y barra de lote al marcar varios. Pendiente hasta que haya asignación; *Advertencia* "N sin
-     agencia" o *OK*. Cuenta como hecho con 0 pendientes. Dibuja máx. 100 filas (el resto, con el buscador).
-     Con el periodo completado queda en solo lectura.
+  4. **Asignación** (`PasoAsignacion`): deshabilitada con la lista de bloqueos; con los insumos completos muestra
+     *Pendiente de aprobación* y el botón *Aprobar y generar* (la asignación no se genera sola). *Regenerar* avisa
+     que las agencias asignadas a mano se reaplican a los equipos que sigan sin agencia.
+  5. **Equipos sin asignar** (`paso-sin-asignar.tsx`): dos vistas. *Sin agencia*: tabla de equipos con agencia NULL,
+     buscador, combobox de agencia por fila y barra de lote al marcar varios. *Asignados a mano*: los equipos del
+     periodo asignados a mano, con la agencia actual, para **corregirlos** (*Cambiar*). Pendiente hasta que haya
+     asignación; *Advertencia* "N sin agencia" o *OK*. Cuenta como hecho con 0 pendientes. Dibuja máx. 100 filas (el
+     resto, con el buscador). Con el periodo completado queda en solo lectura.
   6. **Completar asignación** (`paso-completar.tsx`): *Completar* (deshabilitado con `bloqueos_completar`); ya
      completada muestra quién/cuándo, **Exportar a Excel** (`api.exportar`: fetch → blob → descarga) y *Reabrir*.
      Con cierre, *Regenerar* del paso 4 queda deshabilitado.
@@ -65,7 +67,7 @@ src/
 
 - **Polling** (`use-control.ts`): cada 10 s si hay un proceso en curso, 30 s si no. Al detectar que un proceso
   terminó, muestra un toast y, si la pestaña está oculta y hay permiso, una **notificación del sistema**. El permiso
-  se pide al lanzar un proceso.
+  se pide al lanzar un proceso. Mismo aviso cuando `pendiente_aprobacion` pasa a `true` (insumos completos).
 - **Reloj del servidor**: el backend devuelve `ahora` y el hook calcula el desfase para que los cronómetros usen la
   hora del servidor.
 - **Confirmaciones** (`control/confirmar-accion.tsx`): todo proceso o borrado pide confirmación. Cerrar sesión

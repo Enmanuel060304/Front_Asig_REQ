@@ -74,6 +74,8 @@ def _ejecutar(id_: int, tipo: str, periodo: str, usuario: str, origen: str) -> N
         )
         if tipo == "MORA":
             filas = repo.contar_filas(settings.MORA_TABLA)
+        if tipo == "ASIGNACION":
+            _reaplicar_manuales(periodo, usuario)  # antes de finalizar: nadie asigna mientras sigue EN_PROCESO
         estado, error = "OK", None
     except Exception as e:
         log.exception("Error ejecutando %s", t.sp)
@@ -87,12 +89,38 @@ def _ejecutar(id_: int, tipo: str, periodo: str, usuario: str, origen: str) -> N
             repo.bitacora_add(periodo, usuario, "ok", f"{t.nombre} terminó OK en {_fmt_duracion(duracion)} ({detalle})")
             if t.insumo:
                 insumos.validar(t.insumo, usuario)
+            if tipo != "ASIGNACION":
+                _avisar_si_listo(periodo, usuario)
         else:
             repo.bitacora_add(periodo, usuario, "error", f"{t.nombre} falló: {error}")
     except Exception:
         log.exception("Error registrando el fin del proceso %s", id_)
     finally:
         _lock.release()
+
+
+def _avisar_si_listo(periodo: str, usuario: str) -> None:
+    """Si con este proceso los insumos quedaron completos, deja constancia: la asignación espera aprobación."""
+    asignacion = repo.proceso_ultimo(periodo, "ASIGNACION")
+    if (asignacion and asignacion["Estado"] == "OK") or repo.cierre_get(periodo):
+        return
+    validaciones = {clave: repo.validacion_ultima(periodo, clave) for clave in insumos.INSUMOS}
+    if not insumos.bloqueos_generar(validaciones, repo.proceso_ultimo(periodo, "MORA")):
+        repo.bitacora_add(periodo, usuario, "ok", "Insumos completos: la asignación está lista para aprobar y generar")
+
+
+def _reaplicar_manuales(periodo: str, usuario: str) -> None:
+    """Tras regenerar, vuelve a poner las agencias asignadas a mano a los equipos que el SP dejó sin agencia."""
+    try:
+        reaplicadas, total = repo.asignaciones_reaplicar(periodo)
+        if total:
+            repo.bitacora_add(periodo, usuario, "ok" if reaplicadas == total else "warn",
+                              f"Reaplicó {reaplicadas} de {total} asignaciones manuales de agencia"
+                              + ("" if reaplicadas == total else
+                                 " (el resto ya tiene agencia del SP o ya no está en la asignación)"))
+    except Exception:
+        log.exception("No se pudieron reaplicar las asignaciones manuales")
+        repo.bitacora_add(periodo, usuario, "error", "No se pudieron reaplicar las asignaciones manuales de agencia")
 
 
 def _fmt_duracion(ms: int) -> str:

@@ -302,21 +302,79 @@ def agencias_listar() -> list[dict]:
         return [{"valor": str(r["valor"]).strip(), "nombre": str(r["nombre"]).strip()} for r in _filas(cur)]
 
 
-def asignar_agencia(ids: list[str], agencia: str) -> int:
-    """Pone la agencia a los equipos indicados que sigan sin agencia. Devuelve cuántos se actualizaron."""
+def asignar_agencia(ids: list[str], agencia: str, periodo: str, usuario: str) -> int:
+    """Asigna la agencia a los equipos indicados y deja el cambio en AppAsignacionesManuales.
+
+    Solo se tocan equipos sin agencia o que ya se asignaron a mano en este periodo (para corregirlos); lo que puso el
+    SP no se pisa. Devuelve cuántos cambiaron.
+    """
+    col_id, col_ag = settings.ASIGNACION_COLUMNA_ID, settings.ASIGNACION_COLUMNA_AGENCIA
     total = 0
     with get_connection() as conn:
         cur = conn.cursor()
         for i in range(0, len(ids), 500):  # SQL Server admite ~2100 parámetros por consulta
             bloque = ids[i:i + 500]
+            marcas = ", ".join("?" for _ in bloque)
             cur.execute(
-                f"UPDATE {settings.ASIGNACION_TABLA} SET {settings.ASIGNACION_COLUMNA_AGENCIA} = ? "
-                f"WHERE {_sin_agencia()} AND {settings.ASIGNACION_COLUMNA_ID} IN ({', '.join('?' for _ in bloque)})",
-                agencia, *bloque,
+                f"SELECT {col_id} AS id, {col_ag} AS agencia FROM {settings.ASIGNACION_TABLA} WITH (UPDLOCK) "
+                f"WHERE {col_id} IN ({marcas}) AND ({col_ag} IS NULL OR ({col_ag} <> ? AND {col_id} IN "
+                f"(SELECT EquipoId FROM dbo.AppAsignacionesManuales WHERE Periodo = ?)))",
+                *bloque, agencia, periodo,
+            )
+            cambios = [(str(f.id).strip(), None if f.agencia is None else str(f.agencia).strip()) for f in cur.fetchall()]
+            if not cambios:
+                continue
+            marcas = ", ".join("?" for _ in cambios)
+            cur.execute(
+                f"UPDATE {settings.ASIGNACION_TABLA} SET {col_ag} = ? WHERE {col_id} IN ({marcas})",
+                agencia, *[c[0] for c in cambios],
             )
             total += cur.rowcount
+            cur.executemany(
+                "INSERT INTO dbo.AppAsignacionesManuales (Periodo, EquipoId, AgenciaAnterior, AgenciaNueva, Usuario, Fecha) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [(periodo, eq, anterior, agencia, usuario, ahora()) for eq, anterior in cambios],
+            )
         conn.commit()
     return total
+
+
+def asignados_manual_listar(periodo: str, limite: int) -> tuple[list[str], list[dict]]:
+    """Equipos asignados a mano en el periodo. Cada fila trae `_id` y `_agencia` (valor actual de la tabla)."""
+    visibles = settings.ASIGNACION_COLUMNAS_VISIBLES.split(",")
+    with get_connection() as conn:
+        cur = conn.cursor().execute(
+            f"SELECT TOP ({int(limite)}) {settings.ASIGNACION_COLUMNA_ID} AS _id, "
+            f"{settings.ASIGNACION_COLUMNA_AGENCIA} AS _agencia, {', '.join(visibles)} "
+            f"FROM {settings.ASIGNACION_TABLA} WHERE {settings.ASIGNACION_COLUMNA_ID} IN "
+            f"(SELECT EquipoId FROM dbo.AppAsignacionesManuales WHERE Periodo = ?) "
+            f"ORDER BY {settings.ASIGNACION_COLUMNA_ID}", periodo,
+        )
+        filas = _filas(cur)
+    return [c.strip("[]") for c in visibles], filas
+
+
+def asignaciones_reaplicar(periodo: str) -> tuple[int, int]:
+    """Tras regenerar: reaplica la última agencia manual de cada equipo que el SP dejó sin agencia.
+
+    Devuelve (reaplicadas, equipos con asignación manual en el periodo).
+    """
+    ultimas = (
+        "WITH ult AS (SELECT EquipoId, AgenciaNueva, ROW_NUMBER() OVER (PARTITION BY EquipoId ORDER BY Id DESC) AS rn "
+        "FROM dbo.AppAsignacionesManuales WHERE Periodo = ?) "
+    )
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            ultimas + f"UPDATE a SET a.{settings.ASIGNACION_COLUMNA_AGENCIA} = u.AgenciaNueva "
+            f"FROM {settings.ASIGNACION_TABLA} a JOIN ult u ON a.{settings.ASIGNACION_COLUMNA_ID} = u.EquipoId AND u.rn = 1 "
+            f"WHERE a.{settings.ASIGNACION_COLUMNA_AGENCIA} IS NULL", periodo,
+        )
+        reaplicadas = cur.rowcount
+        total = cur.execute(
+            "SELECT COUNT(DISTINCT EquipoId) FROM dbo.AppAsignacionesManuales WHERE Periodo = ?", periodo).fetchval()
+        conn.commit()
+    return reaplicadas, total
 
 
 def asignacion_exportar(on_columnas, on_filas) -> int:

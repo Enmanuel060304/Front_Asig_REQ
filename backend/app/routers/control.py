@@ -58,39 +58,35 @@ def _estado() -> dict:
         en_curso["DetalleSql"] = repo.sesion_detalle(en_curso["Spid"]) if en_curso["Spid"] else None
 
     lista_insumos = []
-    bloqueos = []
+    validaciones = {}
     for ins in insumos.INSUMOS.values():
-        validacion = repo.validacion_ultima(periodo, ins.clave)
+        validaciones[ins.clave] = repo.validacion_ultima(periodo, ins.clave)
         lista_insumos.append({
             "clave": ins.clave,
             "nombre": ins.nombre,
             "tipo_proceso": ins.tipo_proceso,
-            "validacion": validacion,
+            "validacion": validaciones[ins.clave],
             "extraccion": repo.proceso_ultimo(periodo, ins.tipo_proceso),
             "programacion": progs.get(ins.tipo_proceso),
         })
-        if not validacion:
-            bloqueos.append(f"{ins.nombre}: sin validar")
-        elif not insumos.es_valida(validacion):
-            bloqueos.append(f"{ins.nombre}: {validacion['Detalle']}")
 
     mora = repo.proceso_ultimo(periodo, "MORA")
-    if not mora or mora["Estado"] != "OK":
-        bloqueos.append("Mora: no se ha generado en este periodo")
-    elif not mora["Filas"]:
-        bloqueos.append("Mora: la tabla quedó vacía")
+    bloqueos = insumos.bloqueos_generar(validaciones, mora)
     if en_curso:
         bloqueos.append("Hay un proceso en curso")
 
     asignacion = repo.proceso_ultimo(periodo, "ASIGNACION")
+    asignacion_ok = bool(asignacion and asignacion["Estado"] == "OK")
     sin_asignar = None
-    if asignacion and asignacion["Estado"] == "OK":
+    if asignacion_ok:
         try:
             sin_asignar = repo.sin_asignar_contar()
         except Exception:
             logger.exception("No se pudo contar los equipos sin agencia")
     cierre = repo.cierre_get(periodo)
     bloqueos_completar = [] if cierre else _motivos_completar(asignacion, sin_asignar, en_curso)
+    # Insumos listos y aún sin generar: la asignación espera que una persona la apruebe (Generar)
+    pendiente_aprobacion = not bloqueos and not asignacion_ok and not cierre
 
     return {
         "periodo": periodo,
@@ -113,6 +109,7 @@ def _estado() -> dict:
         "puede_completar": not cierre and not bloqueos_completar,
         "bloqueos": bloqueos,
         "puede_generar": not bloqueos,
+        "pendiente_aprobacion": pendiente_aprobacion,
         "bitacora": repo.bitacora_listar(periodo),
     }
 
@@ -189,6 +186,19 @@ async def sin_asignar():
     return await run_in_threadpool(_sin_asignar)
 
 
+def _asignados_manual() -> dict:
+    columnas, filas = repo.asignados_manual_listar(periodo_actual(), LIMITE_SIN_ASIGNAR)
+    for f in filas:
+        f["_id"] = str(f["_id"]).strip()
+        f["_agencia"] = None if f["_agencia"] is None else str(f["_agencia"]).strip()
+    return {"columnas": columnas, "filas": filas, "total": len(filas)}
+
+
+@router.get("/asignados-manual")
+async def asignados_manual():
+    return await run_in_threadpool(_asignados_manual)
+
+
 @router.get("/agencias")
 async def agencias():
     return await run_in_threadpool(repo.agencias_listar)
@@ -210,13 +220,14 @@ def _asignar_agencia(data: AsignarAgenciaIn, usuario: str) -> dict:
         raise HTTPException(422, "La agencia no existe en el catálogo")
 
     ids = list(dict.fromkeys(data.ids))
-    actualizados = repo.asignar_agencia(ids, agencia["valor"])
+    actualizados = repo.asignar_agencia(ids, agencia["valor"], periodo, usuario)
     if actualizados:
         repo.bitacora_add(periodo, usuario, "ok",
-                          f"Asignó la agencia {agencia['nombre']} a {actualizados} equipo(s) sin agencia")
+                          f"Asignó la agencia {agencia['nombre']} a {actualizados} equipo(s)")
     if actualizados < len(ids):
         repo.bitacora_add(periodo, usuario, "warn",
-                          f"{len(ids) - actualizados} equipo(s) no se actualizaron: ya tenían agencia o no existen")
+                          f"{len(ids) - actualizados} equipo(s) no se actualizaron: la agencia la puso el SP, "
+                          "ya tenían esa agencia o no existen")
     return {"actualizados": actualizados}
 
 

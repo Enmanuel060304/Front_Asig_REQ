@@ -32,6 +32,7 @@ export function useControl() {
   // Diferencia entre el reloj del servidor y el del navegador, para los cronómetros
   const [desfaseMs, setDesfaseMs] = React.useState(0)
   const enCursoPrevio = React.useRef<number | null>(null)
+  const aprobacionPrevia = React.useRef<boolean | null>(null)
 
   const cargar = React.useCallback(async () => {
     try {
@@ -39,6 +40,13 @@ export function useControl() {
       setEstado(e)
       setDesfaseMs(new Date(e.ahora).getTime() - Date.now())
       setError(null)
+
+      // Aviso cuando los insumos quedan completos: la asignación espera aprobación (no al abrir la página)
+      if (aprobacionPrevia.current === false && e.pendiente_aprobacion) {
+        toast.info("Insumos completos", { description: "La asignación está lista para aprobar y generar." })
+        notificar("Insumos completos", "La asignación está lista para aprobar y generar.")
+      }
+      aprobacionPrevia.current = e.pendiente_aprobacion
 
       const previo = enCursoPrevio.current
       enCursoPrevio.current = e.en_curso?.Id ?? null

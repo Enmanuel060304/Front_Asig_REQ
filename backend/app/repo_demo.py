@@ -17,7 +17,8 @@ __all__ = [
     "validacion_registrar", "validacion_ultima", "bitacora_add", "bitacora_listar",
     "prog_listar", "prog_get", "prog_guardar", "prog_actualizar", "prog_eliminar", "prog_vencidas",
     "contar_periodos", "max_periodo", "contar_filas", "ejecutar_sp",
-    "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "asignacion_exportar",
+    "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "asignados_manual_listar",
+    "asignaciones_reaplicar", "asignacion_exportar",
     "cierre_get", "cierre_crear", "cierre_eliminar", "usuario_hash",
 ]
 
@@ -43,6 +44,7 @@ _cierres: dict[str, dict] = {}
 _insumos: dict[str, dict[str, int]] = {"BAJAS": {}, "CAMBIO_TEC": {}}  # clave → {periodo: filas}
 _mora_filas = 0
 _asignacion: list[dict] = []
+_manuales: list[dict] = []  # historial de agencias asignadas a mano (AppAsignacionesManuales)
 _seq = {"proceso": 0, "validacion": 0, "bitacora": 0}
 
 _COLS_PROG = ("Tipo", "Modo", "FechaHora", "DiaMes", "Hora", "Activa", "ProximaEjecucion", "VencimientoOriginal",
@@ -329,16 +331,42 @@ def agencias_listar() -> list[dict]:
     return [{"valor": v, "nombre": n} for v, n in sorted(_AGENCIAS, key=lambda a: a[1])]
 
 
-def asignar_agencia(ids: list[str], agencia: str) -> int:
-    """Pone la agencia a los equipos indicados que sigan sin agencia. Devuelve cuántos se actualizaron."""
+def asignar_agencia(ids: list[str], agencia: str, periodo: str, usuario: str) -> int:
+    """Asigna la agencia a equipos sin agencia o ya asignados a mano en el periodo. Devuelve cuántos cambiaron."""
     pedidos = set(ids)
     total = 0
     with _lock:
+        manuales = {m["EquipoId"] for m in _manuales if m["Periodo"] == periodo}
         for f in _asignacion:
-            if f[_col_agencia()] is None and f[_col_id()] in pedidos:
+            id_, actual = f[_col_id()], f[_col_agencia()]
+            if id_ in pedidos and (actual is None or (actual != agencia and id_ in manuales)):
                 f[_col_agencia()] = agencia
+                _manuales.append({"Periodo": periodo, "EquipoId": id_, "AgenciaAnterior": actual,
+                                  "AgenciaNueva": agencia, "Usuario": usuario, "Fecha": ahora()})
                 total += 1
     return total
+
+
+def asignados_manual_listar(periodo: str, limite: int) -> tuple[list[str], list[dict]]:
+    visibles = _visibles()
+    with _lock:
+        manuales = {m["EquipoId"] for m in _manuales if m["Periodo"] == periodo}
+        filas = sorted((f for f in _asignacion if f[_col_id()] in manuales), key=lambda f: f[_col_id()])
+        return visibles, [{"_id": f[_col_id()], "_agencia": f[_col_agencia()], **{c: f.get(c) for c in visibles}}
+                          for f in filas[:limite]]
+
+
+def asignaciones_reaplicar(periodo: str) -> tuple[int, int]:
+    """Tras regenerar: reaplica la última agencia manual de cada equipo que quedó sin agencia."""
+    with _lock:
+        ultima = {m["EquipoId"]: m["AgenciaNueva"] for m in _manuales if m["Periodo"] == periodo}
+        reaplicadas = 0
+        for f in _asignacion:
+            nueva = ultima.get(f[_col_id()])
+            if nueva and f[_col_agencia()] is None:
+                f[_col_agencia()] = nueva
+                reaplicadas += 1
+        return reaplicadas, len(ultima)
 
 
 def asignacion_exportar(on_columnas, on_filas) -> int:
