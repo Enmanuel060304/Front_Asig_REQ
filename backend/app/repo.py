@@ -60,6 +60,14 @@ def proceso_en_curso() -> dict | None:
         ))
 
 
+def procesos_en_curso() -> list[dict]:
+    """Todos los EN_PROCESO: dentro del flujo, los insumos se extraen a la vez."""
+    with get_connection() as conn:
+        return _filas(conn.cursor().execute(
+            f"SELECT {_COLS_PROCESO} FROM dbo.AppProcesos WHERE Estado = 'EN_PROCESO' ORDER BY Inicio, Id"
+        ))
+
+
 def proceso_ultimo(periodo: str, tipo: str) -> dict | None:
     with get_connection() as conn:
         return _una(conn.cursor().execute(
@@ -223,6 +231,40 @@ def prog_vencidas(momento: datetime) -> list[dict]:
             f"SELECT {_COLS_PROG} FROM dbo.AppProgramaciones WHERE Activa = 1 AND ProximaEjecucion <= ?",
             momento,
         ))
+
+
+# ---------- Histórico por periodo (Dashboard) ----------
+
+def historico_periodos(desde: str) -> list[dict]:
+    """Por periodo >= `desde`: filas de Bajas y Cambio de tecnología (última validación válida, con sus filas del
+    periodo previo y su estado), de la mora y de la asignación (último proceso OK) y equipos asignados a mano.
+    Claves: Periodo, BAJAS, BAJAS_ANTERIOR, BAJAS_ESTADO, CAMBIO_TEC, CAMBIO_TEC_ANTERIOR, CAMBIO_TEC_ESTADO, MORA,
+    ASIGNACION, Manuales (las que no tengan dato no vienen)."""
+    validaciones = (
+        "SELECT Periodo, Insumo, Filas, FilasPeriodoAnterior, Estado FROM ("
+        " SELECT Periodo, Insumo, Filas, FilasPeriodoAnterior, Estado,"
+        " ROW_NUMBER() OVER (PARTITION BY Periodo, Insumo ORDER BY Fecha DESC, Id DESC) AS rn"
+        " FROM dbo.AppValidaciones WHERE Periodo >= ? AND Estado IN ('OK', 'ADVERTENCIA')) t WHERE rn = 1"
+    )
+    consultas = (
+        "SELECT Periodo, Tipo AS Clave, Filas FROM ("
+        " SELECT Periodo, Tipo, Filas,"
+        " ROW_NUMBER() OVER (PARTITION BY Periodo, Tipo ORDER BY Inicio DESC, Id DESC) AS rn"
+        " FROM dbo.AppProcesos WHERE Periodo >= ? AND Tipo IN ('MORA', 'ASIGNACION') AND Estado = 'OK') t WHERE rn = 1",
+        "SELECT Periodo, 'Manuales' AS Clave, COUNT(DISTINCT EquipoId) AS Filas"
+        " FROM dbo.AppAsignacionesManuales WHERE Periodo >= ? GROUP BY Periodo",
+    )
+    datos: dict[str, dict] = {}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for periodo, insumo, filas, anterior, estado in cur.execute(validaciones, desde).fetchall():
+            insumo = insumo.strip()
+            datos.setdefault(periodo.strip(), {}).update(
+                {insumo: filas, f"{insumo}_ANTERIOR": anterior, f"{insumo}_ESTADO": estado.strip()})
+        for sql in consultas:
+            for periodo, clave, filas in cur.execute(sql, desde).fetchall():
+                datos.setdefault(periodo.strip(), {})[clave.strip()] = filas
+    return [{"Periodo": p, **v} for p, v in sorted(datos.items())]
 
 
 # ---------- Objetos de negocio ----------

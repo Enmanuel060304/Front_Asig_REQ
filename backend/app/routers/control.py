@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .. import exportar, insumos, planificador, procesos, repo
 from ..config import settings
-from ..periodo import ahora, periodo_actual, periodo_insumos
+from ..periodo import ahora, anterior, periodo_actual, periodo_insumos
 from ..security import get_current_user, require_csrf_header
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/control", tags=["control"], dependencies=[Depend
 csrf = [Depends(require_csrf_header)]
 
 InsumoClave = Literal["BAJAS", "CAMBIO_TEC"]
-TipoProgramable = Literal["MORA", "EXTRAER_BAJAS", "EXTRAER_CAMBIO_TEC"]
+TipoProgramable = Literal["INSUMOS", "MORA", "EXTRAER_BAJAS", "EXTRAER_CAMBIO_TEC"]
 
 
 def _iniciar(tipo: str, usuario: str) -> dict:
@@ -34,14 +34,14 @@ def _iniciar(tipo: str, usuario: str) -> dict:
 MSG_CERRADA = "La asignación del periodo está completada; reábrela para hacer cambios"
 
 
-def _motivos_completar(asignacion: dict | None, sin_asignar: int | None, en_curso: dict | None) -> list[str]:
+def _motivos_completar(asignacion: dict | None, sin_asignar: int | None, en_curso: object) -> list[str]:
     motivos = []
     if not asignacion or asignacion["Estado"] != "OK":
         motivos.append("La asignación no se ha generado en este periodo")
     elif sin_asignar is None:
         motivos.append("No se pudo revisar los equipos sin agencia")
     elif sin_asignar:
-        motivos.append(f"Quedan {sin_asignar} equipo(s) sin agencia (paso 5)")
+        motivos.append(f"Quedan {sin_asignar} equipo(s) sin agencia (paso 3)")
     if en_curso:
         motivos.append("Hay un proceso en curso")
     return motivos
@@ -52,11 +52,13 @@ def _motivos_completar(asignacion: dict | None, sin_asignar: int | None, en_curs
 def _estado() -> dict:
     periodo = periodo_actual()
     progs = {p["Tipo"]: p for p in repo.prog_listar()}
-    en_curso = repo.proceso_en_curso()
-    if en_curso:
-        en_curso["DuracionPromedioMs"] = repo.duracion_promedio(en_curso["Tipo"])
-        en_curso["DetalleSql"] = repo.sesion_detalle(en_curso["Spid"]) if en_curso["Spid"] else None
+    # Puede haber varios a la vez: el flujo extrae los insumos en paralelo
+    en_curso = repo.procesos_en_curso()
+    for p in en_curso:
+        p["DuracionPromedioMs"] = repo.duracion_promedio(p["Tipo"])
+        p["DetalleSql"] = repo.sesion_detalle(p["Spid"]) if p["Spid"] else None
 
+    secuencia = procesos.secuencia_estado()
     lista_insumos = []
     validaciones = {}
     for ins in insumos.INSUMOS.values():
@@ -68,11 +70,12 @@ def _estado() -> dict:
             "validacion": validaciones[ins.clave],
             "extraccion": repo.proceso_ultimo(periodo, ins.tipo_proceso),
             "programacion": progs.get(ins.tipo_proceso),
+            "opcional_si_vacio": ins.opcional_si_vacio,
         })
 
     mora = repo.proceso_ultimo(periodo, "MORA")
     bloqueos = insumos.bloqueos_generar(validaciones, mora)
-    if en_curso:
+    if en_curso or secuencia:
         bloqueos.append("Hay un proceso en curso")
 
     asignacion = repo.proceso_ultimo(periodo, "ASIGNACION")
@@ -84,9 +87,9 @@ def _estado() -> dict:
         except Exception:
             logger.exception("No se pudo contar los equipos sin agencia")
     cierre = repo.cierre_get(periodo)
-    bloqueos_completar = [] if cierre else _motivos_completar(asignacion, sin_asignar, en_curso)
-    # Insumos listos y aún sin generar: la asignación espera que una persona la apruebe (Generar)
-    pendiente_aprobacion = not bloqueos and not asignacion_ok and not cierre
+    bloqueos_completar = [] if cierre else _motivos_completar(asignacion, sin_asignar, en_curso or secuencia)
+    # Insumos listos y aún sin generar (se extrajeron a mano o el flujo no llegó a generar): se genera en el paso 2
+    listo_para_generar = not bloqueos and not asignacion_ok and not cierre
 
     return {
         "periodo": periodo,
@@ -99,6 +102,8 @@ def _estado() -> dict:
             "duracion_promedio_ms": repo.duracion_promedio("MORA"),
             "programacion": progs.get("MORA"),
         },
+        "insumos_programacion": progs.get("INSUMOS"),
+        "secuencia": secuencia,
         "asignacion": {
             "proceso": asignacion,
             "duracion_promedio_ms": repo.duracion_promedio("ASIGNACION"),
@@ -109,7 +114,7 @@ def _estado() -> dict:
         "puede_completar": not cierre and not bloqueos_completar,
         "bloqueos": bloqueos,
         "puede_generar": not bloqueos,
-        "pendiente_aprobacion": pendiente_aprobacion,
+        "listo_para_generar": listo_para_generar,
         "bitacora": repo.bitacora_listar(periodo),
     }
 
@@ -128,7 +133,7 @@ async def validar(insumo: InsumoClave, usuario: str = Depends(get_current_user))
 
 @router.post("/extraer/{insumo}", status_code=202, dependencies=csrf)
 async def extraer(insumo: InsumoClave, usuario: str = Depends(get_current_user)):
-    return await run_in_threadpool(_iniciar, insumos.INSUMOS[insumo].tipo_proceso, usuario)
+    return await run_in_threadpool(_iniciar, insumos.TIPO_PROCESO[insumo], usuario)
 
 
 @router.post("/mora", status_code=202, dependencies=csrf)
@@ -136,8 +141,26 @@ async def mora(usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(_iniciar, "MORA", usuario)
 
 
+def _iniciar_secuencia(usuario: str) -> dict:
+    try:
+        procesos.iniciar_secuencia(usuario)
+    except procesos.ProcesoEnCurso:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un proceso en curso; espera a que termine")
+    except procesos.PeriodoCerrado:
+        raise HTTPException(status.HTTP_409_CONFLICT, MSG_CERRADA)
+    except procesos.NadaPorHacer:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Los insumos están listos y la asignación ya está generada; para rehacerla usa Regenerar")
+    return {"ok": True}
+
+
+@router.post("/insumos/extraer", status_code=202, dependencies=csrf)
+async def extraer_insumos(usuario: str = Depends(get_current_user)):
+    return await run_in_threadpool(_iniciar_secuencia, usuario)
+
+
 def _iniciar_asignacion(usuario: str, regenerar: bool) -> dict:
-    if repo.proceso_en_curso():
+    if procesos.ocupado():
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un proceso en curso; espera a que termine")
 
     periodo = periodo_actual()
@@ -213,7 +236,7 @@ def _asignar_agencia(data: AsignarAgenciaIn, usuario: str) -> dict:
     periodo = periodo_actual()
     if repo.cierre_get(periodo):
         raise HTTPException(status.HTTP_409_CONFLICT, MSG_CERRADA)
-    if repo.proceso_en_curso():
+    if procesos.ocupado():
         raise HTTPException(status.HTTP_409_CONFLICT, "Hay un proceso en curso; espera a que termine")
     agencia = next((a for a in repo.agencias_listar() if a["valor"] == data.agencia), None)
     if not agencia:
@@ -244,7 +267,7 @@ def _completar(usuario: str) -> dict:
         raise HTTPException(status.HTTP_409_CONFLICT, "La asignación de este periodo ya está completada")
     # Revalidar en el servidor: no confiar en lo que muestra la pantalla
     motivos = _motivos_completar(repo.proceso_ultimo(periodo, "ASIGNACION"), repo.sin_asignar_contar(),
-                                 repo.proceso_en_curso())
+                                 procesos.ocupado())
     if motivos:
         raise HTTPException(422, {"mensaje": "No se puede completar la asignación", "motivos": motivos})
     repo.cierre_crear(periodo, usuario)
@@ -305,6 +328,43 @@ async def procesos_listar(tipo: str | None = None, limite: int = 500):
     return await run_in_threadpool(repo.procesos_listar, tipo, min(max(limite, 1), 5000))
 
 
+PERIODOS_HISTORICO = 12
+
+
+def _variacion(filas: int | None, previo: int | None) -> float | None:
+    return round((filas - previo) / previo * 100, 1) if filas is not None and previo else None
+
+
+def _historico(periodo: str) -> list[dict]:
+    """Los últimos 12 periodos seguidos hasta el actual; null donde no hay dato.
+
+    Bajas y Cambio de tecnología llevan la variación y el estado de su propia validación (la alerta coincide con la
+    Advertencia de Control). La mora, que no se valida, se compara con el último periodo anterior que la tenga."""
+    periodos = [periodo]
+    while len(periodos) < PERIODOS_HISTORICO:
+        periodos.insert(0, anterior(periodos[0]))
+    # Un periodo más atrás para que la mora del primero tenga con qué compararse
+    datos = {r["Periodo"]: r for r in repo.historico_periodos(anterior(periodos[0]))}
+    mora_previa = datos.get(anterior(periodos[0]), {}).get("MORA")
+    resultado = []
+    for p in periodos:
+        d = datos.get(p, {})
+        fila = {"periodo": p}
+        for clave, campo in (("BAJAS", "bajas"), ("CAMBIO_TEC", "cambio_tec")):
+            fila[campo] = d.get(clave)
+            fila[f"{campo}_variacion"] = _variacion(d.get(clave), d.get(f"{clave}_ANTERIOR"))
+            fila[f"{campo}_alerta"] = d.get(f"{clave}_ESTADO") == "ADVERTENCIA"
+        mora = d.get("MORA")
+        variacion = _variacion(mora, mora_previa)
+        fila.update(mora=mora, mora_variacion=variacion,
+                    mora_alerta=variacion is not None and abs(variacion) > settings.VARIACION_ALERTA_PCT,
+                    equipos=d.get("ASIGNACION"), manuales=d.get("Manuales"))
+        if mora is not None:
+            mora_previa = mora
+        resultado.append(fila)
+    return resultado
+
+
 def _resumen() -> dict:
     periodo = periodo_actual()
     return {
@@ -313,6 +373,8 @@ def _resumen() -> dict:
         "mora": repo.proceso_ultimo(periodo, "MORA"),
         "mora_duracion_promedio_ms": repo.duracion_promedio("MORA"),
         "por_dia": [{"fecha": r["Dia"].isoformat(), "ok": r["Ok"], "error": r["Error"]} for r in repo.procesos_por_dia(90)],
+        "historico": _historico(periodo),
+        "variacion_alerta_pct": settings.VARIACION_ALERTA_PCT,
     }
 
 
@@ -342,7 +404,7 @@ def _guardar_programacion(tipo: str, data: ProgramacionIn, usuario: str) -> dict
 
     repo.prog_guardar(tipo, data.modo, fecha_hora, data.dia_mes if data.modo == "MENSUAL" else None,
                       data.hora if data.modo == "MENSUAL" else None, proxima, usuario)
-    nombre = procesos.TIPOS[tipo].nombre
+    nombre = procesos.nombre(tipo)
     cuando = f"el día {data.dia_mes} de cada mes a las {data.hora}" if data.modo == "MENSUAL" else f"{proxima:%d/%m/%Y %H:%M}"
     repo.bitacora_add(periodo_actual(), usuario, "info", f"Programó {nombre}: {cuando}")
     return repo.prog_get(tipo)
@@ -368,7 +430,7 @@ def _cambiar_activa(tipo: str, activa: bool, usuario: str) -> dict:
             raise HTTPException(422, "La fecha programada ya pasó; edita la programación")
     repo.prog_actualizar(tipo, Activa=activa, ProximaEjecucion=proxima, VencimientoOriginal=proxima)
     accion = "Reanudó" if activa else "Pausó"
-    repo.bitacora_add(periodo_actual(), usuario, "info", f"{accion} la programación de {procesos.TIPOS[tipo].nombre}")
+    repo.bitacora_add(periodo_actual(), usuario, "info", f"{accion} la programación de {procesos.nombre(tipo)}")
     return repo.prog_get(tipo)
 
 
@@ -379,7 +441,7 @@ async def cambiar_activa(tipo: TipoProgramable, data: ActivaIn, usuario: str = D
 
 def _eliminar_programacion(tipo: str, usuario: str) -> dict:
     repo.prog_eliminar(tipo)
-    repo.bitacora_add(periodo_actual(), usuario, "info", f"Eliminó la programación de {procesos.TIPOS[tipo].nombre}")
+    repo.bitacora_add(periodo_actual(), usuario, "info", f"Eliminó la programación de {procesos.nombre(tipo)}")
     return {"ok": True}
 
 

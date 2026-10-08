@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import planificador, procesos
 from .config import settings
-from .routers import auth, control
+from .routers import auth, control, demo
 
 logging.basicConfig(level=logging.INFO)
 mimetypes.add_type("application/manifest+json", ".webmanifest")
@@ -41,6 +41,8 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(control.router)
+if settings.DEMO_MODE:
+    app.include_router(demo.router)  # solo existe en la demo: en producción responde 404
 
 # En producción FastAPI sirve el build del frontend (mismo origen → cookies sin CORS)
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"

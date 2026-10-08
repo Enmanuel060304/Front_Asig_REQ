@@ -1,4 +1,4 @@
--- Historial de agencias asignadas a mano (paso 5). Una fila por cambio; la vigente de cada equipo es la más reciente
+-- Historial de agencias asignadas a mano (paso 3). Una fila por cambio; la vigente de cada equipo es la más reciente
 -- (Id mayor) de su periodo. Al regenerar la asignación se reaplican sobre los equipos que el SP deja sin agencia.
 -- Fechas en hora local de la app (APP_TIMEZONE).
 

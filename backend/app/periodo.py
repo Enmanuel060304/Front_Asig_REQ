@@ -17,14 +17,34 @@ def periodo_de(d: datetime) -> str:
     return f"{d.year}{d.month:02d}"
 
 
+# Solo el modo demo lo mueve (botón "Siguiente periodo"); en producción es siempre 0.
+# Desplaza el periodo, no la hora: las fechas y los cronómetros siguen siendo reales.
+_meses_simulados = 0
+
+
 def periodo_actual() -> str:
     """Periodo de la asignación: el mes en curso."""
-    return periodo_de(ahora())
+    periodo = periodo_de(ahora())
+    for _ in range(_meses_simulados):
+        periodo = siguiente(periodo)
+    return periodo
+
+
+def avanzar_periodo() -> str:
+    """Modo demo: pasa al mes siguiente. Devuelve el nuevo periodo."""
+    global _meses_simulados
+    _meses_simulados += 1
+    return periodo_actual()
 
 
 def anterior(periodo: str) -> str:
     y, m = int(periodo[:4]), int(periodo[4:])
     return f"{y - 1}12" if m == 1 else f"{y}{m - 1:02d}"
+
+
+def siguiente(periodo: str) -> str:
+    y, m = int(periodo[:4]), int(periodo[4:])
+    return f"{y + 1}01" if m == 12 else f"{y}{m + 1:02d}"
 
 
 def periodo_insumos(periodo: str | None = None) -> str:

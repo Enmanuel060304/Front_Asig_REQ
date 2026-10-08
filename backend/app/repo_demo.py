@@ -3,6 +3,7 @@
 `repo.py` lo importa al final y sobreescribe sus funciones, así el resto de la app no sabe que es demo.
 Los SPs se simulan con una pausa corta y cambiando el estado en memoria; todo se pierde al reiniciar el backend.
 """
+import random
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -14,8 +15,8 @@ from .security import hash_password
 __all__ = [
     "proceso_crear", "proceso_set_spid", "proceso_finalizar", "proceso_get", "proceso_en_curso", "proceso_ultimo",
     "procesos_listar", "procesos_por_dia", "duracion_promedio", "procesos_marcar_interrumpidos", "sesion_detalle",
-    "validacion_registrar", "validacion_ultima", "bitacora_add", "bitacora_listar",
-    "prog_listar", "prog_get", "prog_guardar", "prog_actualizar", "prog_eliminar", "prog_vencidas",
+    "validacion_registrar", "validacion_ultima", "bitacora_add", "bitacora_listar", "procesos_en_curso",
+    "prog_listar", "prog_get", "prog_guardar", "prog_actualizar", "prog_eliminar", "prog_vencidas", "historico_periodos",
     "contar_periodos", "max_periodo", "contar_filas", "ejecutar_sp",
     "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "asignados_manual_listar",
     "asignaciones_reaplicar", "asignacion_exportar",
@@ -32,6 +33,9 @@ FILAS_MORA = 85_000
 EQUIPOS = 60
 EQUIPOS_SIN_AGENCIA = 14
 _SPID = 57
+# Las cantidades fijas de arriba son las del periodo real (el punto de partida documentado). Al pasar a otro periodo
+# con "Siguiente periodo" se varían al azar, con una semilla por periodo: reejecutar da el mismo resultado.
+_PERIODO_INICIAL = periodo_actual()
 
 _lock = threading.RLock()
 
@@ -71,6 +75,21 @@ def _clave_insumo(tabla: str) -> str:
     return "BAJAS" if tabla == settings.BAJAS_TABLA else "CAMBIO_TEC"
 
 
+def _azar(clave: str) -> random.Random | None:
+    """Generador determinista para el periodo actual; None en el periodo inicial (se usan las cantidades fijas)."""
+    periodo = periodo_actual()
+    return None if periodo == _PERIODO_INICIAL else random.Random(f"{periodo}-{clave}")
+
+
+def _variar(base: int, rnd: random.Random, prob_alerta: float = 0.2) -> int:
+    """Variación habitual de -12% a +15%; con `prob_alerta`, de 32% a 50% (supera el umbral de Advertencia)."""
+    if rnd.random() < prob_alerta:
+        delta = rnd.uniform(0.32, 0.5) * rnd.choice((1, -1))
+    else:
+        delta = rnd.uniform(-0.12, 0.15)
+    return max(1, round(base * (1 + delta)))
+
+
 def _siguiente(tabla: str) -> int:
     _seq[tabla] += 1
     return _seq[tabla]
@@ -85,6 +104,12 @@ def proceso_crear(periodo: str, tipo: str, origen: str, usuario: str) -> int:
                           "Usuario": usuario, "Inicio": ahora(), "Fin": None, "DuracionMs": None, "Filas": None,
                           "Spid": None, "Error": None})
     return id_
+
+
+def procesos_en_curso() -> list[dict]:
+    with _lock:
+        return [dict(p) for p in sorted((p for p in _procesos if p["Estado"] == "EN_PROCESO"),
+                                        key=lambda p: (p["Inicio"], p["Id"]))]
 
 
 def _proceso(id_: int) -> dict | None:
@@ -240,6 +265,28 @@ def prog_vencidas(momento: datetime) -> list[dict]:
                 if p["Activa"] and p["ProximaEjecucion"] and p["ProximaEjecucion"] <= momento]
 
 
+# ---------- Histórico por periodo (Dashboard) ----------
+
+def historico_periodos(desde: str) -> list[dict]:
+    datos: dict[str, dict] = {}
+    with _lock:
+        for v in _validaciones:  # en orden: la última válida de cada periodo queda al final
+            if v["Periodo"] >= desde and v["Estado"] in ("OK", "ADVERTENCIA"):
+                datos.setdefault(v["Periodo"], {}).update({
+                    v["Insumo"]: v["Filas"], f"{v['Insumo']}_ANTERIOR": v["FilasPeriodoAnterior"],
+                    f"{v['Insumo']}_ESTADO": v["Estado"]})
+        for pr in sorted(_procesos, key=lambda x: (x["Inicio"], x["Id"])):
+            if pr["Periodo"] >= desde and pr["Tipo"] in ("MORA", "ASIGNACION") and pr["Estado"] == "OK":
+                datos.setdefault(pr["Periodo"], {})[pr["Tipo"]] = pr["Filas"]
+        manuales: dict[str, set] = {}
+        for m in _manuales:
+            if m["Periodo"] >= desde:
+                manuales.setdefault(m["Periodo"], set()).add(m["EquipoId"])
+        for periodo, ids in manuales.items():
+            datos.setdefault(periodo, {})["Manuales"] = len(ids)
+    return [{"Periodo": p, **v} for p, v in sorted(datos.items())]
+
+
 # ---------- Objetos de negocio ----------
 
 def contar_periodos(tabla: str, columna: str, periodos: list[str]) -> dict[str, int]:
@@ -263,6 +310,24 @@ def contar_filas(tabla: str) -> int:
         return sum(_insumos[_clave_insumo(tabla)].values())
 
 
+def _filas_previas(tipo: str, defecto: int) -> int:
+    """Filas del último proceso OK de `tipo` en un periodo anterior al actual (base estable aunque se reejecute)."""
+    actual = periodo_actual()
+    previas = [p for p in _procesos if p["Tipo"] == tipo and p["Estado"] == "OK" and p["Filas"]
+               and p["Periodo"] < actual]
+    return max(previas, key=lambda p: (p["Periodo"], p["Inicio"]))["Filas"] if previas else defecto
+
+
+def _manuales_previos() -> int | None:
+    """Equipos asignados a mano en el último periodo anterior al actual que los tenga."""
+    actual = periodo_actual()
+    anteriores = [m["Periodo"] for m in _manuales if m["Periodo"] < actual]
+    if not anteriores:
+        return None
+    ultimo = max(anteriores)
+    return len({m["EquipoId"] for m in _manuales if m["Periodo"] == ultimo})
+
+
 def ejecutar_sp(nombre: str, param: str, valor: str | None, timeout: int, on_spid) -> int | None:
     """Simula el SP: pausa y cambia el estado en memoria. Devuelve las filas 'afectadas'."""
     global _mora_filas, _asignacion
@@ -273,15 +338,27 @@ def ejecutar_sp(nombre: str, param: str, valor: str | None, timeout: int, on_spi
         with _lock:
             _mora_filas = 0  # el SP real trunca la tabla antes de cargar
     time.sleep(PAUSA[clave])
+    rnd = _azar(clave)
     with _lock:
         if clave == "MORA":
-            _mora_filas = FILAS_MORA
+            _mora_filas = _variar(_filas_previas("MORA", FILAS_MORA), rnd, prob_alerta=0) if rnd else FILAS_MORA
             return _mora_filas
         if clave == "ASIGNACION":
-            _asignacion = _generar_asignacion()
+            if rnd:  # varían sobre el periodo anterior; los sin agencia pueden saltar de vez en cuando
+                equipos = _variar(_filas_previas("ASIGNACION", EQUIPOS), rnd, prob_alerta=0)
+                sin_agencia = min(max(_variar(_manuales_previos() or EQUIPOS_SIN_AGENCIA, rnd), 1), equipos - 1)
+                _asignacion = _generar_asignacion(equipos, sin_agencia)
+            else:
+                _asignacion = _generar_asignacion(EQUIPOS, EQUIPOS_SIN_AGENCIA)
             return len(_asignacion)
-        _insumos[clave][periodo_insumos()] = FILAS_EXTRACCION[clave]
-        return FILAS_EXTRACCION[clave]
+        esperado = periodo_insumos()
+        if rnd:
+            base = _insumos[clave].get(anterior(esperado), FILAS_EXTRACCION[clave])
+            filas = _variar(base, rnd)
+        else:
+            filas = FILAS_EXTRACCION[clave]
+        _insumos[clave][esperado] = filas
+        return filas
 
 
 # ---------- Equipos sin agencia (toda la tabla de asignación) ----------
@@ -296,15 +373,16 @@ _AGENCIAS = [("AG01", "Agencia Norte"), ("AG02", "Agencia Sur"), ("AG03", "Agenc
              ("AG04", "Agencia Occidente"), ("AG05", "Agencia Oriente"), ("AG06", "Agencia Costa")]
 
 
-def _generar_asignacion() -> list[dict]:
+def _generar_asignacion(equipos: int, sin_agencia: int) -> list[dict]:
     """Equipos ficticios. Los 'sin agencia' tienen un barrio que no pertenece al municipio (el caso real del SP)."""
     municipios = list(_MUNICIPIOS)
     filas = []
-    for n in range(EQUIPOS):
+    paso = max(1, equipos // max(1, sin_agencia))
+    for n in range(equipos):
         municipio = municipios[n % len(municipios)]
         barrio = _MUNICIPIOS[municipio][(n // len(municipios)) % 4]
         agencia = _AGENCIAS[n % len(_AGENCIAS)][0]
-        if n % (EQUIPOS // EQUIPOS_SIN_AGENCIA) == 0 and sum(f[_col_agencia()] is None for f in filas) < EQUIPOS_SIN_AGENCIA:
+        if n % paso == 0 and sum(f[_col_agencia()] is None for f in filas) < sin_agencia:
             barrio = _MUNICIPIOS[municipios[(n + 1) % len(municipios)]][0]  # barrio de otro municipio
             agencia = None
         fila = {"Serie": f"SN{periodo_actual()}{n + 1:04d}", "Municipio": municipio, "Barrio": barrio,
@@ -409,23 +487,56 @@ def usuario_hash(username: str) -> str | None:
 
 def _semilla() -> None:
     esperado = periodo_insumos()
-    previo = anterior(esperado)
     # Bajas sigue en el periodo anterior (→ Error: hay que extraer); Cambio de tecnología ya está al día
-    _insumos["BAJAS"][previo] = 12_400
-    _insumos["CAMBIO_TEC"].update({previo: 3_100, esperado: 3_250})
+    _insumos["CAMBIO_TEC"][esperado] = 3_250
 
-    # Historial del periodo anterior: da datos al Dashboard y un promedio para la barra de progreso
-    pasado = anterior(periodo_actual())
-    hoy = ahora()
-    historial = [("EXTRAER_BAJAS", 34, "OK", 4_800), ("EXTRAER_CAMBIO_TEC", 34, "OK", 5_200),
-                 ("MORA", 36, "ERROR", 9_000), ("MORA", 33, "OK", 22_000), ("ASIGNACION", 32, "OK", 6_100)]
-    for tipo, dias, estado, ms in historial:
-        inicio = hoy - timedelta(days=dias)
-        _procesos.append({"Id": _siguiente("proceso"), "Periodo": pasado, "Tipo": tipo, "Origen": "MANUAL",
-                          "Estado": estado, "Usuario": USUARIO_DEMO, "Inicio": inicio,
-                          "Fin": inicio + timedelta(milliseconds=ms), "DuracionMs": ms,
-                          "Filas": None if estado == "ERROR" else 1_000, "Spid": None,
-                          "Error": "Tiempo de espera agotado (dato de ejemplo)" if estado == "ERROR" else None})
+    # 6 periodos pasados completos: dan histórico al Dashboard y un promedio para la barra de progreso.
+    # Listas del más antiguo al más reciente; las de insumos tienen uno más (el previo del primero, para la variación).
+    # Bajas salta +31% en uno y Cambio de tecnología cae -31% en otro (→ Advertencia); los asignados a mano bajan.
+    bajas = [11_000, 11_200, 11_900, 15_600, 12_100, 12_600, 12_400]
+    cambio_tec = [2_850, 2_900, 2_950, 3_000, 2_050, 2_400, 3_100]
+    mora = [80_500, 81_900, 83_000, 82_400, 84_100, 84_700]
+    equipos = [55, 58, 61, 57, 63, 60]
+    manuales = [19, 17, 22, 15, 12, 11]
+
+    periodos = [anterior(periodo_actual())]
+    while len(periodos) < 7:
+        periodos.insert(0, anterior(periodos[0]))
+    # periodos[0] solo aporta el previo de la variación; periodos[1:] son los 6 periodos pasados. El dato de insumos
+    # de cada periodo de asignación vive en su periodo de insumos (el mes anterior). El último (12.400) es el que
+    # tiene Bajas al arrancar la demo.
+    for clave, serie in (("BAJAS", bajas), ("CAMBIO_TEC", cambio_tec)):
+        for periodo, filas in zip(periodos, serie):
+            _insumos[clave][anterior(periodo)] = filas
+
+    def proceso(periodo: str, tipo: str, inicio: datetime, ms: int, filas: int | None, error: str | None = None):
+        _procesos.append({"Id": _siguiente("proceso"), "Periodo": periodo, "Tipo": tipo, "Origen": "MANUAL",
+                          "Estado": "ERROR" if error else "OK", "Usuario": USUARIO_DEMO, "Inicio": inicio,
+                          "Fin": inicio + timedelta(milliseconds=ms), "DuracionMs": ms, "Filas": filas,
+                          "Spid": None, "Error": error})
+
+    for n, periodo in enumerate(periodos[1:]):
+        dia = datetime(int(periodo[:4]), int(periodo[4:]), 2 + n % 3, 9, 0)
+        for clave, serie in (("BAJAS", bajas), ("CAMBIO_TEC", cambio_tec)):
+            filas, filas_ant = serie[n + 1], serie[n]
+            variacion = (filas - filas_ant) / filas_ant * 100
+            alerta = abs(variacion) > settings.VARIACION_ALERTA_PCT
+            proceso(periodo, f"EXTRAER_{clave}", dia, 4_800 + 300 * n, filas)
+            _validaciones.append({
+                "Id": _siguiente("validacion"), "Periodo": periodo, "Insumo": clave,
+                "Estado": "ADVERTENCIA" if alerta else "OK", "PeriodoEncontrado": periodos[n], "Filas": filas,
+                "FilasPeriodoAnterior": filas_ant, "Usuario": USUARIO_DEMO, "Fecha": dia + timedelta(minutes=5),
+                "Detalle": f"Variación de {variacion:+.1f}% respecto al periodo anterior (dato de ejemplo)",
+            })
+        if n == len(mora) - 1:  # un error de ejemplo en el último periodo
+            proceso(periodo, "MORA", dia + timedelta(hours=1), 9_000, None, "Tiempo de espera agotado (dato de ejemplo)")
+        proceso(periodo, "MORA", dia + timedelta(hours=2), 20_000 + 500 * n, mora[n])
+        proceso(periodo, "ASIGNACION", dia + timedelta(hours=3), 6_100, equipos[n])
+        for i in range(manuales[n]):
+            _manuales.append({"Periodo": periodo, "EquipoId": f"SN{periodo}{i + 1:04d}", "AgenciaAnterior": None,
+                              "AgenciaNueva": _AGENCIAS[i % len(_AGENCIAS)][0], "Usuario": USUARIO_DEMO,
+                              "Fecha": dia + timedelta(hours=4)})
+        _cierres[periodo] = {"Periodo": periodo, "Usuario": USUARIO_DEMO, "Fecha": dia + timedelta(days=1)}
 
 
 _semilla()

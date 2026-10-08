@@ -5,14 +5,7 @@ import { Bitacora } from "@/components/control/bitacora"
 import { EstadoBadge, type EstadoPaso } from "@/components/control/estado-badge"
 import { PasoCompletar } from "@/components/control/paso-completar"
 import { PasoSinAsignar } from "@/components/control/paso-sin-asignar"
-import {
-  PasoAsignacion,
-  PasoInsumo,
-  PasoMora,
-  estadoAsignacion,
-  estadoInsumo,
-  estadoMora,
-} from "@/components/control/pasos"
+import { PasoAsignacion, PasoInsumos, estadoAsignacion, insumosListos } from "@/components/control/pasos"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -21,14 +14,19 @@ import { api, type EstadoControl } from "@/lib/api"
 import { NOMBRE_PROCESO, nombrePeriodo } from "@/lib/formato"
 
 function estadoGeneral(c: EstadoControl): { estado: EstadoPaso; texto: string } {
-  if (c.en_curso) return { estado: "EN_PROCESO", texto: `${NOMBRE_PROCESO[c.en_curso.Tipo]} en curso` }
+  if (c.secuencia?.fase === "ASIGNACION") return { estado: "EN_PROCESO", texto: "Generando la asignación" }
+  if (c.secuencia) {
+    const n = c.secuencia.actuales.length
+    return { estado: "EN_PROCESO", texto: n ? `Extrayendo insumos (${n} en curso)` : "Extracción de insumos en curso" }
+  }
+  if (c.en_curso.length) return { estado: "EN_PROCESO", texto: `${NOMBRE_PROCESO[c.en_curso[0].Tipo]} en curso` }
   if (c.cierre) return { estado: "OK", texto: "Asignación completada" }
   if (c.asignacion.proceso?.Estado === "OK") {
     return c.sin_asignar
       ? { estado: "ADVERTENCIA", texto: `Pendiente: ${c.sin_asignar} equipo(s) sin agencia` }
       : { estado: "OK", texto: "Lista para completar" }
   }
-  if (c.puede_generar) return { estado: "OK", texto: "Pendiente de aprobación para generar" }
+  if (c.puede_generar) return { estado: "OK", texto: "Lista para generar" }
   return { estado: "ADVERTENCIA", texto: `Bloqueado: ${c.bloqueos[0]}` }
 }
 
@@ -38,7 +36,7 @@ export function ControlAsignacion() {
 
   // Al entrar, validar los insumos que aún no se validaron en este periodo
   React.useEffect(() => {
-    if (!c || autoValidado.current || c.en_curso) return
+    if (!c || autoValidado.current || c.en_curso.length) return
     autoValidado.current = true
     const pendientes = c.insumos.filter((i) => !i.validacion)
     if (pendientes.length) {
@@ -62,10 +60,9 @@ export function ControlAsignacion() {
 
   const listo = (e: EstadoPaso) => e === "OK" || e === "ADVERTENCIA"
   const pasos = [
-    ...c.insumos.map((i) => listo(estadoInsumo(i, c))),
-    listo(estadoMora(c)),
+    insumosListos(c), // paso 1: Bajas, Cambio de tecnología y Mora
     listo(estadoAsignacion(c)),
-    c.sin_asignar === 0, // paso 5: sin equipos pendientes de agencia
+    c.sin_asignar === 0, // paso 3: sin equipos pendientes de agencia
     !!c.cierre,
   ]
   const completos = pasos.filter(Boolean).length
@@ -103,13 +100,10 @@ export function ControlAsignacion() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <ol id="tour-pasos" className="xl:col-span-2">
-          {c.insumos.map((ins, i) => (
-            <PasoInsumo key={ins.clave} numero={i + 1} insumo={ins} {...comunes} />
-          ))}
-          <PasoMora numero={c.insumos.length + 1} {...comunes} />
-          <PasoAsignacion numero={c.insumos.length + 2} {...comunes} />
-          <PasoSinAsignar numero={c.insumos.length + 3} control={c} onCambio={recargar} />
-          <PasoCompletar numero={c.insumos.length + 4} control={c} onCambio={recargar} />
+          <PasoInsumos numero={1} {...comunes} />
+          <PasoAsignacion numero={2} {...comunes} />
+          <PasoSinAsignar numero={3} control={c} onCambio={recargar} />
+          <PasoCompletar numero={4} control={c} onCambio={recargar} />
         </ol>
         <Bitacora eventos={c.bitacora} />
       </div>

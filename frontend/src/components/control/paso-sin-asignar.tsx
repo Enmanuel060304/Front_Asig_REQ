@@ -83,7 +83,7 @@ export function PasoSinAsignar({
   onCambio: () => void
 }) {
   const habilitado = control.sin_asignar != null
-  const bloqueado = !!control.en_curso || !!control.cierre
+  const bloqueado = control.en_curso.length > 0 || !!control.secuencia || !!control.cierre
   const [vista, setVista] = React.useState<Vista>("pendientes")
   const [datos, setDatos] = React.useState<SinAsignar | null>(null)
   const [agencias, setAgencias] = React.useState<Agencia[] | null>(null)

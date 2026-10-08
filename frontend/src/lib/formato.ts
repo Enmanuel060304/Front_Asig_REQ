@@ -1,4 +1,4 @@
-import type { TipoProceso } from "@/lib/api"
+import type { TipoProceso, TipoProgramable } from "@/lib/api"
 
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -10,11 +10,24 @@ export function nombrePeriodo(periodo: string) {
   return `${MESES[Number(periodo.slice(4)) - 1]} ${periodo.slice(0, 4)}`
 }
 
+/** "202610" → "Oct 26" (ejes de los gráficos) */
+export function periodoCorto(periodo: string) {
+  return `${MESES[Number(periodo.slice(4)) - 1].slice(0, 3)} ${periodo.slice(2, 4)}`
+}
+
 export const NOMBRE_PROCESO: Record<TipoProceso, string> = {
   EXTRAER_BAJAS: "Extracción Bajas",
   EXTRAER_CAMBIO_TEC: "Extracción Cambio de tecnología",
   MORA: "Mora",
   ASIGNACION: "Asignación",
+}
+
+/** Lo que se puede programar: los procesos (excepto la asignación) y el flujo completo (extraer y generar). */
+export const NOMBRE_PROGRAMABLE: Record<TipoProgramable, string> = {
+  EXTRAER_BAJAS: NOMBRE_PROCESO.EXTRAER_BAJAS,
+  EXTRAER_CAMBIO_TEC: NOMBRE_PROCESO.EXTRAER_CAMBIO_TEC,
+  MORA: NOMBRE_PROCESO.MORA,
+  INSUMOS: "Extraer y generar asignación (los 3 insumos a la vez)",
 }
 
 export const fmtFecha = (v: string) =>

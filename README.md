@@ -16,13 +16,13 @@ SQL Server y permite programar los procesos largos desde la web.
 La **asignación** es una base de equipos que deben retirarse y que se envía a **empresas contratistas** para que
 hagan el retiro. Se genera **una vez al mes** con un stored procedure en SQL Server (`SP_ASIGNACION`).
 
-Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
+Ese SP depende de **3 insumos**, independientes entre sí (se extraen a la vez):
 
-| Insumo | De dónde sale | Cómo se valida | Si no está listo |
+| Insumo | De dónde sale | Cómo se valida | ¿Obligatorio? |
 |---|---|---|---|
-| **Bajas** | Una BD externa (linked server). Un SP de extracción la trae a una tabla | La tabla debe tener datos del **periodo del mes anterior** | Ejecutar el SP de extracción (`SP_EXTRAER_BAJAS`) y revalidar |
-| **Cambio de tecnología** | Mismo servidor que Bajas, con su propio SP de extracción | Igual: periodo del mes anterior | Ejecutar `SP_EXTRAER_CAMBIO_TEC` y revalidar |
-| **Mora** | SP propio (`SP_MORA`, **~40 min**) que **trunca** una tabla e inserta los datos nuevos | El SP de mora terminó OK en el mes actual y la tabla tiene filas | Ejecutar (o programar) la mora |
+| **Bajas** | Una BD externa (linked server). Un SP de extracción (`SP_EXTRAER_BAJAS`) la trae a una tabla | La tabla debe tener datos del **periodo del mes anterior** | **Sí**: si falla, no se genera |
+| **Cambio de tecnología** | Mismo servidor que Bajas, con su propio SP (`SP_EXTRAER_CAMBIO_TEC`) | Igual: periodo del mes anterior | Sí, salvo que el periodo **venga vacío** (hay meses sin cambios de tecnología): extracción OK con 0 filas = OK. Si la extracción falla, bloquea |
+| **Mora** | SP propio (`SP_MORA`, **~40 min**) que **trunca** una tabla e inserta los datos nuevos | El SP de mora terminó OK en el mes actual y la tabla tiene filas | **Sí**: si falla, no se genera |
 
 ### Periodos
 
@@ -34,40 +34,52 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 ### Flujo del periodo
 
 ```
-① Bajas ──┐
-② Cambio de tecnología ──┼──► ④ Asignación ──► ⑤ Equipos sin asignar ──► ⑥ Completar ──► Excel para las empresas
-③ Mora (~40 min) ──┘
+① Extracción de insumos              ② Asignación              ③ Equipos sin asignar     ④ Completar
+Bajas ┐
+Cambio de tec. ├─ a la vez ──► (se genera sola si   ──► (agencia a mano) ──► (cerrar) ──► Excel para las empresas
+Mora  ┘                         Bajas y Mora OK)
 ```
 
 1. Al abrir **Control de asignación** se validan los insumos que aún no se validaron en el periodo.
-2. Si un insumo no tiene el periodo esperado → **Extraer del servidor** (o programar la extracción).
-3. Ejecutar o programar la **Mora**.
-4. Cuando los 3 insumos están OK el periodo queda *pendiente de aprobación*: una persona pulsa **Aprobar y
-   generar** (no se genera sola).
-5. **Equipos sin asignar**: el SP deja la agencia en `NULL` cuando los datos del equipo no cuadran (p. ej. un barrio
+2. **Pasos 1 y 2 — Extraer y generar asignación**: un único botón (o **Programar** el mismo flujo) extrae **a la vez**
+   los insumos que falten y, si quedan válidos, **genera la asignación automáticamente**. Si alguno falla, se detiene
+   sin generar y la bitácora dice por qué. Cada insumo también se puede extraer o programar por separado desde su
+   fila desplegable (p. ej. reintentar solo el que falló); en ese caso la asignación se genera desde el paso 2.
+4. **Paso 3 — Equipos sin asignar**: el SP deja la agencia en `NULL` cuando los datos del equipo no cuadran (p. ej. un barrio
    que no pertenece al municipio registrado). Aquí se listan y el usuario les asigna una agencia a mano, uno a uno o
    varios a la vez, eligiendo del catálogo de agencias (tabla SQL, siempre las vigentes). Revisa **toda** la tabla
    de asignación (lo nuevo y lo pendiente de periodos anteriores). La vista *Asignados a mano* permite corregir una
    asignación; se conservan al regenerar.
-6. **Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo y
+5. **Paso 4 — Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo y
    entonces **Exportar a Excel** toda la tabla de asignación.
-7. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
+6. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
 
 ### Reglas de negocio
 
-- **Un solo proceso a la vez** (extracción, mora o asignación). La asignación lee las tablas que los otros procesos
-  truncan/cargan, por eso nunca se pisan. Si ya hay uno en curso → `409`.
+- **Una sola operación a la vez**: un proceso suelto (extracción, mora o asignación) o el flujo completo. Dentro del
+  flujo los 3 insumos corren **en paralelo**, pero la asignación siempre corre **sola**, después: lee las tablas que
+  los otros procesos truncan/cargan. Si ya hay algo en curso → `409`.
 - **La asignación revalida los insumos en el servidor** justo antes de ejecutarse; no confía en lo que muestra la
   pantalla. Si falta algo → `422` con la lista de motivos.
 - **Regenerar**: si ya hay una asignación OK en el periodo, generar otra exige confirmación reforzada (`regenerar=true`).
+- **Extracción en paralelo** (decisión del negocio, 2026-10-08): Bajas, Cambio de tecnología y Mora no dependen
+  entre sí, así que el flujo los extrae **a la vez**, **omite** los ya listos y espera a que terminen todos. No hay
+  orden entre ellos (antes había orden estricto e invalidación en cascada; se eliminaron).
+- **Generación automática con insumos obligatorios**: al terminar la extracción, si **Bajas** es válida, **Mora** está
+  OK con filas y **Cambio de tecnología** está OK (o vacía), el flujo genera la asignación sin intervención. Si Bajas o
+  Mora fallan (o Cambio de tecnología falla, que no es lo mismo que venir vacía), el flujo **se aborta**: no se genera
+  y queda en bitácora "Flujo detenido" con cada motivo (p. ej. "La extracción de Bajas falló: …"). Si la asignación
+  ya estaba generada, el flujo no la rehace: para eso está *Regenerar*.
+- **Programar el flujo**: es una programación más (tipo `INSUMOS`, con las mismas reglas de tolerancia y espera) y
+  hace lo mismo que el botón, generación incluida. Si los insumos ya están listos y la asignación generada, se omite.
 - **Variación de filas**: si un insumo varía más de `VARIACION_ALERTA_PCT` (30% por defecto) respecto al periodo
-  anterior, queda en **Advertencia**. No bloquea, solo avisa.
+  anterior, queda en **Advertencia**. No bloquea ni frena la generación automática; para no confundir, en pantalla
+  se muestra **OK** y, al lado, el aviso de Advertencia con la variación.
 - **Mora OK** = el último proceso de mora del periodo terminó OK y la tabla de mora tiene filas.
 - **Extracciones programadas**: si al llegar la hora el insumo **ya** tiene el periodo correcto, la extracción se
   **omite** (no se recarga un insumo válido) y la tarjeta muestra "Último disparo: Omitida…". Decisión del negocio.
-- **Aprobación para generar**: cuando los 3 insumos quedan OK (y no hay asignación generada) el periodo queda
-  *Pendiente de aprobación*: se deja constancia en la bitácora, se avisa en pantalla y una persona pulsa *Aprobar y
-  generar*. La asignación nunca se genera sola.
+- **Extracciones sueltas**: extraer un insumo por separado no genera la asignación. Si con eso los insumos quedan
+  listos, el paso 2 muestra *Lista para generar* (y se avisa en pantalla) y se genera con su botón.
 - **Asignación manual de agencia**: solo se actualizan equipos con agencia `NULL` o que ya se asignaron a mano en
   el periodo (para **corregirlos**); lo que puso el SP no se pisa. Solo con agencias del catálogo (se valida en el
   servidor). Cada cambio queda en `AppAsignacionesManuales` (agencia anterior y nueva, usuario, fecha). **Se
@@ -98,7 +110,7 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
    - **Insumos** (Bajas y Cambio de tecnología): tabla donde se valida el periodo, columna del periodo (`YYYYMM`)
      y SP de extracción (opcionalmente con parámetro de periodo, p. ej. `@Periodo`)
    - **Mora**: `SP_MORA` y `MORA_TABLA`
-   - **Asignación**: `SP_ASIGNACION`; y para el paso 5, la tabla que llena (`ASIGNACION_TABLA`), su columna
+   - **Asignación**: `SP_ASIGNACION`; y para el paso 3, la tabla que llena (`ASIGNACION_TABLA`), su columna
      identificadora, la de agencia y las columnas a mostrar (se usa la tabla completa, también para el Excel)
    - **Agencias**: `AGENCIAS_TABLA` (puede ser una vista que filtre las activas), columna del valor que se escribe y
      columna del nombre visible
@@ -116,7 +128,7 @@ Ese SP depende de **3 insumos** que deben estar listos antes de ejecutarlo:
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
    mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación
-   (paso 5). Para ver el detalle en vivo de la sesión SQL mientras corre un proceso necesita además
+   (paso 3). Para ver el detalle en vivo de la sesión SQL mientras corre un proceso necesita además
    `VIEW SERVER STATE` (opcional).
 
 3. **Backend**
@@ -158,6 +170,15 @@ etiqueta **Modo demo** en el header.
   Los SPs "tardan" segundos (extracción ~5 s, mora ~20 s, asignación ~5 s; constantes `PAUSA` en `repo_demo.py`).
 - **Punto de partida**: Bajas está en el periodo anterior (Error → hay que extraer; al extraer queda en *Advertencia*
   por la variación), Cambio de tecnología está OK y la Mora vacía. La asignación genera 60 equipos, 14 sin agencia (las asignadas a mano se reaplican al regenerar).
+  Trae además **6 periodos pasados completos** (con una Advertencia en Bajas y otra en Cambio de tecnología) para que
+  el Dashboard tenga histórico.
+- **Siguiente periodo** (botón en el header, solo en la demo): simula que empezó el mes siguiente para recorrer varios
+  periodos. Desplaza solo el periodo (`periodo.periodo_actual()`), no la hora. En el periodo nuevo hay que volver a
+  extraer los insumos y las cantidades **varían al azar**: Bajas y Cambio de tecnología sobre el periodo anterior, a
+  veces más del 30% (→ *Advertencia*); la Mora y los equipos también sobre el periodo anterior, pero sin superar el
+  umbral; los sin agencia sobre los asignados a mano del periodo anterior, con algún salto ocasional. La semilla es
+  por periodo, así que reejecutar da lo mismo. Con
+  `DEMO_MODE=false` el endpoint no existe y el botón no se muestra.
 - La lógica real (un proceso a la vez, revalidaciones, completar, Excel, programaciones) corre igual sobre ese estado.
 - El estado vive en memoria: se reinicia al reiniciar el backend. No usar en producción.
 - Si `npm run demo` avisa que el puerto 8000 está en uso, hay una demo anterior viva (en Windows, Ctrl+C con
@@ -205,9 +226,10 @@ En Chrome/Edge aparece el ícono **Instalar app** en la barra de direcciones (o 
 
 ## Pendiente / ideas para siguientes fases
 
-1. ~~Exportar la base a Excel y cerrar el periodo~~ (hecho: paso 6). Idea: una hoja o archivo por empresa.
-2. ~~Encadenar la asignación~~ (hecho con aprobación: aviso al completar los insumos + *Aprobar y generar*). Idea:
-   disparar la validación/extracción de insumos también de forma encadenada.
+1. ~~Exportar la base a Excel y cerrar el periodo~~ (hecho: paso 4). Idea: una hoja o archivo por empresa.
+2. ~~Encadenar la asignación~~ (hecho). Primero se hizo con aprobación humana y extracción en orden estricto; el
+   **2026-10-08** el negocio decidió extraer los 3 insumos en paralelo y **generar automáticamente** cuando Bajas y
+   Mora quedan OK (Cambio de tecnología opcional si viene vacío).
 3. **Roles**: operador (ejecuta) vs. consulta (solo ve).
 4. **Avisos por correo/Teams** al terminar procesos o detectar insumos faltantes.
 5. Probar contra la BD real: llenar `.env` con los nombres reales de tablas/SPs y validar por linked server.

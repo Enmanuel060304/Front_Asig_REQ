@@ -22,51 +22,52 @@ const PASOS: DriveStep[] = [
     element: "#tour-nav-control",
     popover: {
       title: "Control de asignación",
-      description: "Valida los insumos, genera la mora y la asignación del periodo.",
+      description: "Extrae los insumos, genera la asignación y cierra el periodo en 4 pasos.",
     },
   },
   {
     element: "#tour-periodo",
     popover: {
       title: "Periodo",
-      description: "Mes de la asignación, periodo esperado de los insumos (mes anterior) y avance de los pasos.",
+      description: "Mes de la asignación, periodo esperado de los insumos (mes anterior) y avance de los 4 pasos.",
+    },
+  },
+  {
+    element: "#tour-insumos",
+    popover: {
+      title: "1. Extracción de insumos",
+      description:
+        "Reúne los 3 insumos de la asignación: Bajas, Cambio de tecnología y Mora. “Extraer y generar asignación” los extrae a la vez (los que ya están listos se omiten) y, si Bajas y Mora quedan OK y Cambio de tecnología OK o sin datos, genera la asignación automáticamente. Si alguno falla, el flujo se detiene y la bitácora indica el motivo. “Programar” agenda ese mismo flujo completo para una fecha y hora.",
     },
   },
   {
     element: "#tour-insumo-BAJAS",
     popover: {
-      title: "1. Bajas",
+      title: "Cada insumo por separado",
       description:
-        "Primer insumo: la tabla de Bajas debe tener el periodo del mes anterior. Si no lo tiene, usa “Extraer del servidor” o programa la extracción. “Revalidar” vuelve a revisarla.",
+        "Despliega un insumo para ver su detalle (periodo, filas, variación) y sus propias acciones: Extraer (reintentar solo ese, por ejemplo el que dio error), Revalidar y Programar. Extraer uno suelto no genera la asignación. Si las filas varían más de 30% respecto al periodo anterior verás OK y, al lado, una Advertencia: es solo un aviso, no bloquea.",
     },
   },
   {
     element: "#tour-insumo-CAMBIO_TEC",
     popover: {
-      title: "2. Cambio de tecnología",
+      title: "Obligatorios y opcional",
       description:
-        "Segundo insumo: igual que Bajas, debe tener el periodo del mes anterior; se extrae del mismo servidor con su propio SP. Si las filas varían más de 30% respecto al periodo anterior queda en Advertencia: avisa, pero no bloquea.",
-    },
-  },
-  {
-    element: "#tour-mora",
-    popover: {
-      title: "3. Mora",
-      description:
-        "Ejecuta el SP de mora (~40 min) y sigue su avance. Puedes programarlo para una fecha y hora o cada mes.",
+        "Bajas y Mora son obligatorios: si fallan, la asignación no se genera. Cambio de tecnología es opcional solo cuando el periodo no trae datos (queda “OK · sin datos”); si su extracción falla, también detiene el flujo.",
     },
   },
   {
     element: "#tour-asignacion",
     popover: {
-      title: "4. Asignación",
-      description: "Se habilita cuando todos los insumos están OK. Pide confirmación antes de ejecutar.",
+      title: "2. Asignación",
+      description:
+        "La genera el flujo automáticamente. Si los insumos se extrajeron por separado, aquí aparece “Lista para generar” y la generas con el botón. “Regenerar” rehace una asignación ya generada (con confirmación).",
     },
   },
   {
     element: "#tour-sin-asignar",
     popover: {
-      title: "5. Equipos sin asignar",
+      title: "3. Equipos sin asignar",
       description:
         "Equipos que el SP dejó sin agencia por datos inconsistentes. Asígnales una agencia uno a uno o varios a la vez.",
     },
@@ -74,7 +75,7 @@ const PASOS: DriveStep[] = [
   {
     element: "#tour-completar",
     popover: {
-      title: "6. Completar asignación",
+      title: "4. Completar asignación",
       description:
         "Cuando no quedan equipos sin agencia, completa la asignación para cerrar el periodo y exportarla a Excel.",
     },
@@ -87,10 +88,34 @@ const PASOS: DriveStep[] = [
     },
   },
   {
+    element: "#tour-demo-periodo",
+    popover: {
+      title: "Siguiente periodo (solo demo)",
+      description:
+        "Simula que empezó el mes siguiente para recorrer varios periodos: hay que volver a extraer los insumos y las cantidades varían, así el histórico del Dashboard se va llenando.",
+    },
+  },
+  {
     element: "#tour-cards",
     popover: {
       title: "Resumen",
       description: "Estado de la asignación y la mora del periodo actual.",
+    },
+  },
+  {
+    element: "#tour-chart-insumos",
+    popover: {
+      title: "Insumos por periodo",
+      description:
+        "Filas de Bajas, Cambio de tecnología y Mora en los últimos 12 periodos. En ámbar, los que quedaron en Advertencia al validarse (su variación respecto al periodo anterior superó el umbral); en la Mora, que no se valida, los que variaron más del umbral respecto a la mora anterior.",
+    },
+  },
+  {
+    element: "#tour-chart-calidad",
+    popover: {
+      title: "Equipos asignados a mano",
+      description:
+        "Porcentaje de equipos que el SP dejó sin agencia porque sus datos no cuadran y hubo que asignar a mano. Si sube, conviene revisar la calidad de los datos de origen.",
     },
   },
   {

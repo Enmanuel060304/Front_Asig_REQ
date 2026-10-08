@@ -62,7 +62,7 @@ GO
 -- Programaciones (una por tipo de proceso)
 IF OBJECT_ID('dbo.AppProgramaciones', 'U') IS NULL
 CREATE TABLE dbo.AppProgramaciones (
-    Tipo                VARCHAR(30)   NOT NULL PRIMARY KEY,  -- MORA | EXTRAER_BAJAS | EXTRAER_CAMBIO_TEC
+    Tipo                VARCHAR(30)   NOT NULL PRIMARY KEY,  -- MORA | EXTRAER_BAJAS | EXTRAER_CAMBIO_TEC | INSUMOS (flujo: extraer + generar)
     Modo                VARCHAR(10)   NOT NULL,              -- UNICA | MENSUAL
     FechaHora           DATETIME2(0)  NULL,                  -- UNICA
     DiaMes              TINYINT       NULL,                  -- MENSUAL (si el mes es más corto, último día)

@@ -12,7 +12,7 @@ from .periodo import ahora, periodo_actual, proxima_mensual
 
 log = logging.getLogger(__name__)
 
-TIPOS_PROGRAMABLES = ("MORA", "EXTRAER_BAJAS", "EXTRAER_CAMBIO_TEC")
+TIPOS_PROGRAMABLES = ("INSUMOS", "MORA", "EXTRAER_BAJAS", "EXTRAER_CAMBIO_TEC")  # INSUMOS = flujo completo (extraer + generar)
 INTERVALO_SEG = 30
 REINTENTO = timedelta(minutes=5)
 
@@ -35,7 +35,7 @@ def _avanzar(prog: dict, momento: datetime, **extra) -> None:
 
 def _procesar(prog: dict, momento: datetime) -> None:
     tipo = prog["Tipo"]
-    nombre = procesos.TIPOS[tipo].nombre
+    nombre = procesos.nombre(tipo)
     usuario = f"programador ({prog['CreadoPor']})"
     periodo = periodo_actual()
     vencimiento = prog["VencimientoOriginal"] or prog["ProximaEjecucion"]
@@ -48,18 +48,34 @@ def _procesar(prog: dict, momento: datetime) -> None:
         _avanzar(prog, momento, UltimoResultado=resultado, UltimoNivel="warn")
         return
 
-    insumo = procesos.TIPOS[tipo].insumo
-    if insumo:
-        validacion = insumos.validar(insumo, usuario)
+    clave = None if tipo == "INSUMOS" else next(k for k, t in insumos.TIPO_PROCESO.items() if t == tipo)
+    # Extracción suelta: si el insumo ya es válido no se recarga (si hay otro proceso, se evalúa en el reintento)
+    if clave and clave != "MORA" and not procesos.ocupado():
+        validacion = insumos.validar(clave, usuario)
         if insumos.es_valida(validacion):
             resultado = (f"Omitida el {momento:%d/%m/%Y %H:%M}: el insumo ya tenía el periodo "
-                         f"{validacion['PeriodoEncontrado']}, no hizo falta extraer")
+                         f"{validacion['PeriodoEncontrado'] or validacion['Detalle']}, no hizo falta extraer")
             repo.bitacora_add(periodo, usuario, "info", f"{nombre} programada: {resultado}")
             _avanzar(prog, momento, UltimaEjecucion=momento, UltimoResultado=resultado, UltimoNivel="info")
             return
 
     try:
-        id_ = procesos.iniciar(tipo, usuario, "PROGRAMADO")
+        if clave:
+            id_ = procesos.iniciar(tipo, usuario, "PROGRAMADO")
+        else:  # el flujo completo: extrae en paralelo y genera la asignación si los insumos quedan válidos
+            procesos.iniciar_secuencia(usuario, "PROGRAMADO")
+            id_ = None
+    except procesos.NadaPorHacer:
+        resultado = (f"Omitida el {momento:%d/%m/%Y %H:%M}: los insumos ya estaban listos "
+                     "y la asignación ya estaba generada")
+        repo.bitacora_add(periodo, usuario, "info", f"{nombre} programada: {resultado}")
+        _avanzar(prog, momento, UltimaEjecucion=momento, UltimoResultado=resultado, UltimoNivel="info")
+        return
+    except procesos.PeriodoCerrado:
+        resultado = f"No se ejecutó el {momento:%d/%m/%Y %H:%M}: la asignación del periodo está completada"
+        repo.bitacora_add(periodo, usuario, "warn", f"{nombre} programada: {resultado}")
+        _avanzar(prog, momento, UltimoResultado=resultado, UltimoNivel="warn")
+        return
     except procesos.ProcesoEnCurso:
         resultado = f"En espera desde {vencimiento:%H:%M}: hay otro proceso en curso; se reintenta cada 5 min"
         if retraso < timedelta(seconds=INTERVALO_SEG * 2):  # avisar en bitácora solo en el primer intento

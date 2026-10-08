@@ -31,8 +31,9 @@ export function useControl() {
   const [error, setError] = React.useState<string | null>(null)
   // Diferencia entre el reloj del servidor y el del navegador, para los cronómetros
   const [desfaseMs, setDesfaseMs] = React.useState(0)
-  const enCursoPrevio = React.useRef<number | null>(null)
-  const aprobacionPrevia = React.useRef<boolean | null>(null)
+  const enCursoPrevio = React.useRef<number[]>([])
+  const listoPrevio = React.useRef<boolean | null>(null)
+  const flujoPrevio = React.useRef(false)
 
   const cargar = React.useCallback(async () => {
     try {
@@ -41,17 +42,19 @@ export function useControl() {
       setDesfaseMs(new Date(e.ahora).getTime() - Date.now())
       setError(null)
 
-      // Aviso cuando los insumos quedan completos: la asignación espera aprobación (no al abrir la página)
-      if (aprobacionPrevia.current === false && e.pendiente_aprobacion) {
-        toast.info("Insumos completos", { description: "La asignación está lista para aprobar y generar." })
-        notificar("Insumos completos", "La asignación está lista para aprobar y generar.")
+      // Extracciones sueltas: avisar cuando los insumos quedan listos (no al abrir la página)
+      if (listoPrevio.current === false && e.listo_para_generar) {
+        toast.info("Insumos listos", { description: "Genera la asignación en el paso 2." })
+        notificar("Insumos listos", "Genera la asignación en el paso 2.")
       }
-      aprobacionPrevia.current = e.pendiente_aprobacion
+      listoPrevio.current = e.listo_para_generar
 
-      const previo = enCursoPrevio.current
-      enCursoPrevio.current = e.en_curso?.Id ?? null
-      if (previo && previo !== e.en_curso?.Id) {
-        const p = await api.proceso(previo)
+      // Pueden terminar varios a la vez (el flujo extrae en paralelo): un aviso por cada uno
+      const actuales = e.en_curso.map((p) => p.Id)
+      const terminados = enCursoPrevio.current.filter((id) => !actuales.includes(id))
+      enCursoPrevio.current = actuales
+      for (const id of terminados) {
+        const p = await api.proceso(id)
         const nombre = NOMBRE_PROCESO[p.Tipo]
         if (p.Estado === "OK") {
           toast.success(`${nombre} terminó`, { description: `Duración: ${fmtDuracion(p.DuracionMs)}` })
@@ -61,6 +64,16 @@ export function useControl() {
           notificar(`${nombre} falló`, p.Error ?? "Revisa la bitácora")
         }
       }
+
+      // Fin del flujo: su resultado es el último evento de la bitácora (completo o detenido con el motivo)
+      if (flujoPrevio.current && !e.secuencia && e.bitacora[0]) {
+        const { Nivel, Mensaje } = e.bitacora[0]
+        const titulo = Nivel === "error" ? "El flujo se detuvo" : "Flujo terminado"
+        if (Nivel === "error") toast.error(titulo, { description: Mensaje, duration: 15_000 })
+        else toast.success(titulo, { description: Mensaje })
+        notificar(titulo, Mensaje)
+      }
+      flujoPrevio.current = !!e.secuencia
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return logout()
       setError(err instanceof Error ? err.message : "Error al cargar")
@@ -71,7 +84,7 @@ export function useControl() {
     cargar()
   }, [cargar])
 
-  const hayProceso = !!estado?.en_curso
+  const hayProceso = !!estado?.en_curso.length || !!estado?.secuencia
   React.useEffect(() => {
     const id = setInterval(cargar, hayProceso ? POLL_EN_CURSO_MS : POLL_REPOSO_MS)
     return () => clearInterval(id)

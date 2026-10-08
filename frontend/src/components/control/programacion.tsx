@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, type Programacion, type ProgramacionIn, type TipoProgramable } from "@/lib/api"
-import { NOMBRE_PROCESO, fmtFecha } from "@/lib/formato"
+import { NOMBRE_PROGRAMABLE, fmtFecha } from "@/lib/formato"
 import { cn } from "cn"
 
 type Nivel = NonNullable<Programacion["UltimoNivel"]>
@@ -111,9 +111,10 @@ export function ProgramarDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={guardar} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>Programar {NOMBRE_PROCESO[tipo]}</DialogTitle>
+            <DialogTitle>Programar {NOMBRE_PROGRAMABLE[tipo]}</DialogTitle>
             <DialogDescription>
               El servidor lo ejecutará automáticamente a la hora indicada, aunque nadie tenga la app abierta.
+              {tipo === "INSUMOS" && " Extrae a la vez los insumos que falten (omite los listos) y, si quedan válidos, genera la asignación."}
             </DialogDescription>
           </DialogHeader>
           <Tabs value={modo} onValueChange={(v) => setModo(v as "UNICA" | "MENSUAL")}>
@@ -235,7 +236,7 @@ export function ProgramacionInfo({ prog, onCambio }: { prog: Programacion; onCam
           variant="ghost"
           size="sm"
           titulo="¿Eliminar la programación?"
-          descripcion={`${NOMBRE_PROCESO[prog.Tipo]} ya no se ejecutará automáticamente.`}
+          descripcion={`${NOMBRE_PROGRAMABLE[prog.Tipo]} ya no se ejecutará automáticamente.`}
           textoConfirmar="Eliminar"
           destructiva
           onConfirmar={eliminar}

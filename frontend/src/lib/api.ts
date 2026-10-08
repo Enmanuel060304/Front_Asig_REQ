@@ -57,7 +57,8 @@ async function descargar(url: string, nombrePorDefecto: string): Promise<void> {
 }
 
 export type TipoProceso = "EXTRAER_BAJAS" | "EXTRAER_CAMBIO_TEC" | "MORA" | "ASIGNACION"
-export type TipoProgramable = Exclude<TipoProceso, "ASIGNACION">
+/** INSUMOS = el flujo completo: extrae los 3 insumos a la vez y genera la asignación si quedan válidos */
+export type TipoProgramable = Exclude<TipoProceso, "ASIGNACION"> | "INSUMOS"
 export type InsumoClave = "BAJAS" | "CAMBIO_TEC"
 
 export type Proceso = {
@@ -125,26 +126,37 @@ export type EstadoInsumo = {
   validacion: Validacion | null
   extraccion: Proceso | null
   programacion: Programacion | null
+  /** Si la extracción terminó OK pero el periodo no trae filas, cuenta como OK (Cambio de tecnología) */
+  opcional_si_vacio: boolean
 }
 
 export type EstadoControl = {
   periodo: string
   periodo_insumos: string
   ahora: string
-  en_curso: ProcesoEnCurso | null
+  /** Procesos corriendo: dentro del flujo los insumos se extraen a la vez */
+  en_curso: ProcesoEnCurso[]
   insumos: EstadoInsumo[]
-  mora: { proceso: Proceso | null; duracion_promedio_ms: number | null; programacion: Programacion | null }
+  mora: {
+    proceso: Proceso | null
+    duracion_promedio_ms: number | null
+    programacion: Programacion | null
+  }
+  /** Programación del flujo completo (extraer y generar) */
+  insumos_programacion: Programacion | null
+  /** Flujo en curso (retiene el turno de principio a fin): fase y procesos en vuelo */
+  secuencia: { fase: "EXTRACCION" | "ASIGNACION"; actuales: TipoProceso[] } | null
   asignacion: { proceso: Proceso | null; duracion_promedio_ms: number | null }
   /** Equipos con agencia NULL; null si la asignación del periodo aún no está generada */
   sin_asignar: number | null
-  /** Periodo completado (cerrado): habilita la exportación y bloquea el paso 5 y Regenerar */
+  /** Periodo completado (cerrado): habilita la exportación y bloquea el paso 3 y Regenerar */
   cierre: Cierre | null
   bloqueos_completar: string[]
   puede_completar: boolean
   bloqueos: string[]
   puede_generar: boolean
-  /** Insumos listos y asignación sin generar: espera que una persona la apruebe */
-  pendiente_aprobacion: boolean
+  /** Insumos listos y asignación sin generar (se extrajeron a mano): se genera en el paso 2 */
+  listo_para_generar: boolean
   bitacora: EventoBitacora[]
 }
 
@@ -164,6 +176,28 @@ export type Resumen = {
   mora: Proceso | null
   mora_duracion_promedio_ms: number | null
   por_dia: { fecha: string; ok: number; error: number }[]
+  /** Últimos 12 periodos hasta el actual; null donde no hay dato */
+  historico: Historico[]
+  variacion_alerta_pct: number
+}
+
+/** Variación % y alerta las calcula el back: Bajas y Cambio de tecnología = las de su validación (alerta =
+ * Advertencia); Mora = contra el último periodo con mora (alerta = supera el umbral). */
+export type Historico = {
+  periodo: string
+  bajas: number | null
+  bajas_variacion: number | null
+  bajas_alerta: boolean
+  cambio_tec: number | null
+  cambio_tec_variacion: number | null
+  cambio_tec_alerta: boolean
+  mora: number | null
+  mora_variacion: number | null
+  mora_alerta: boolean
+  /** Filas de la tabla de asignación del último proceso OK del periodo */
+  equipos: number | null
+  /** Equipos asignados a mano en el periodo */
+  manuales: number | null
 }
 
 export type ProgramacionIn =
@@ -180,6 +214,7 @@ export const api = {
   control: () => request<EstadoControl>("GET", "/api/control"),
   validar: (insumo: InsumoClave) => request<Validacion>("POST", `/api/control/validar/${insumo}`),
   extraer: (insumo: InsumoClave) => request<{ id: number }>("POST", `/api/control/extraer/${insumo}`),
+  extraerInsumos: () => request<{ ok: boolean }>("POST", "/api/control/insumos/extraer"),
   mora: () => request<{ id: number }>("POST", "/api/control/mora"),
   asignacion: (regenerar = false) =>
     request<{ id: number }>("POST", `/api/control/asignacion${regenerar ? "?regenerar=true" : ""}`),
@@ -195,6 +230,7 @@ export const api = {
   procesos: (tipo?: TipoProceso) =>
     request<Proceso[]>("GET", `/api/control/procesos${tipo ? `?tipo=${tipo}` : ""}`),
   resumen: () => request<Resumen>("GET", "/api/control/resumen"),
+  siguientePeriodo: () => request<{ periodo: string }>("POST", "/api/demo/siguiente-periodo"),
 
   programar: (tipo: TipoProgramable, data: ProgramacionIn) =>
     request<Programacion>("PUT", `/api/control/programaciones/${tipo}`, data),

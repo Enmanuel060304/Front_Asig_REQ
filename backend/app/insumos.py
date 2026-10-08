@@ -18,6 +18,8 @@ class Insumo:
     sp_extraer: str
     param_periodo: str
     tipo_proceso: str
+    # True = si la extracción terminó OK pero el periodo no tiene filas, cuenta como OK (hay meses sin datos)
+    opcional_si_vacio: bool = False
 
 
 INSUMOS: dict[str, Insumo] = {
@@ -28,6 +30,7 @@ INSUMOS: dict[str, Insumo] = {
     "CAMBIO_TEC": Insumo(
         "CAMBIO_TEC", "Cambio de tecnología", settings.CAMBIO_TEC_TABLA, settings.CAMBIO_TEC_COLUMNA_PERIODO,
         settings.SP_EXTRAER_CAMBIO_TEC, settings.SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO, "EXTRAER_CAMBIO_TEC",
+        opcional_si_vacio=True,  # hay periodos sin cambios de tecnología
     ),
 }
 
@@ -38,8 +41,28 @@ def es_valida(validacion: dict | None) -> bool:
     return bool(validacion) and validacion["Estado"] in ESTADOS_VALIDOS
 
 
+# Orden de presentación (se extraen a la vez: no dependen entre sí). Clave → tipo de proceso.
+ORDEN = ("BAJAS", "CAMBIO_TEC", "MORA")
+TIPO_PROCESO = {**{k: i.tipo_proceso for k, i in INSUMOS.items()}, "MORA": "MORA"}
+NOMBRES = {**{k: i.nombre for k, i in INSUMOS.items()}, "MORA": "Mora"}
+
+
+def mora_lista(mora: dict | None) -> bool:
+    return bool(mora and mora["Estado"] == "OK" and mora["Filas"])
+
+
+def vigente(periodo: str, clave: str) -> bool:
+    """El insumo está listo: OK o Advertencia (o vacío permitido) / mora OK con filas."""
+    if clave == "MORA":
+        return mora_lista(repo.proceso_ultimo(periodo, "MORA"))
+    return es_valida(repo.validacion_ultima(periodo, clave))
+
+
 def bloqueos_generar(validaciones: dict[str, dict | None], mora: dict | None) -> list[str]:
-    """Motivos por los que aún no se puede generar la asignación (sin contar si hay un proceso en curso)."""
+    """Motivos por los que aún no se puede generar la asignación (sin contar si hay un proceso en curso).
+
+    Bajas y Mora son obligatorias; Cambio de tecnología también, salvo que su extracción haya venido vacía (eso ya
+    lo resuelve `validar`, que la deja en OK). La Advertencia no bloquea."""
     bloqueos = []
     for ins in INSUMOS.values():
         v = validaciones.get(ins.clave)
@@ -75,6 +98,10 @@ def validar(clave: str, usuario: str) -> dict:
             else:
                 estado = "OK"
                 detalle = f"Periodo {esperado} con {filas:,} filas".replace(",", ".")
+        elif ins.opcional_si_vacio and _extraccion_ok(periodo, ins):
+            # Se extrajo bien y el periodo no trae filas: hay meses sin datos, no es un error
+            estado = "OK"
+            detalle = f"Sin {ins.nombre.lower()} en el periodo {esperado} (0 filas)"
         else:
             encontrado = repo.max_periodo(ins.tabla, ins.columna)
             estado = "ERROR"
@@ -88,3 +115,8 @@ def validar(clave: str, usuario: str) -> dict:
     nivel = {"OK": "ok", "ADVERTENCIA": "warn"}.get(estado, "error")
     repo.bitacora_add(periodo, usuario, nivel, f"Validación {ins.nombre}: {detalle}")
     return repo.validacion_ultima(periodo, clave)
+
+
+def _extraccion_ok(periodo: str, ins: Insumo) -> bool:
+    p = repo.proceso_ultimo(periodo, ins.tipo_proceso)
+    return bool(p and p["Estado"] == "OK")
