@@ -138,7 +138,9 @@ Una programación por tipo (`MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC` e `INS
 | Normal | `procesos.iniciar(...)` o, para `INSUMOS`, `procesos.iniciar_secuencia(...)` con `origen="PROGRAMADO"` | "Se ejecutó el …" (ok) |
 
 - **Mensual**: día del mes + hora; si el mes es más corto (ej. 31 en febrero) se usa el último día.
-- **Única**: al dispararse queda `Activa = 0` ("ya procesada" en la UI).
+- **Única**: al menos **1 minuto en el futuro** respecto al minuto en curso del servidor (`MINIMO_FUTURO`; se
+  escribe y valida en hora de `APP_TIMEZONE`, el 422 muestra la hora del servidor). Al dispararse queda `Activa = 0`
+  ("ya procesada" en la UI).
 - `VencimientoOriginal` guarda la hora pactada para medir la tolerancia aunque haya reintentos.
 - Usuario registrado: `programador (<quien la creó>)`.
 
@@ -215,7 +217,7 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | GET | `/api/control/procesos?tipo=&limite=` | Historial de procesos |
 | GET | `/api/control/procesos/{id}` | Un proceso |
 | GET | `/api/control/resumen` | Datos del Dashboard: asignación y mora del periodo, procesos por día, `historico` (12 periodos: `bajas`, `cambio_tec`, `mora` con su `_variacion` y `_alerta`; `equipos`, `manuales`) y `variacion_alerta_pct` |
-| PUT | `/api/control/programaciones/{tipo}` | `tipo` = `MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC` o `INSUMOS`. Crea/reemplaza: `{modo:"UNICA", fecha_hora}` o `{modo:"MENSUAL", dia_mes, hora:"HH:MM"}` |
+| PUT | `/api/control/programaciones/{tipo}` | `tipo` = `MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC` o `INSUMOS`. Crea/reemplaza: `{modo:"UNICA", fecha_hora}` (hora del servidor, ≥ 1 min en el futuro; 422 si no) o `{modo:"MENSUAL", dia_mes, hora:"HH:MM"}` |
 | PATCH | `/api/control/programaciones/{tipo}` | `{activa}` — pausar/reanudar |
 | DELETE | `/api/control/programaciones/{tipo}` | Eliminar |
 | POST | `/api/control/completar` | Cierra el periodo (409 si ya está, 422 con `{mensaje, motivos}`) |

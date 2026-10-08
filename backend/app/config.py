@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     AGENCIAS_COLUMNA_NOMBRE: str  # lo que ve el usuario
 
     # Programación
-    APP_TIMEZONE: str = "America/Guatemala"
+    APP_TIMEZONE: str = "America/Managua"
     PROGRAMACION_TOLERANCIA_MIN: int = 120
 
     # Seguridad

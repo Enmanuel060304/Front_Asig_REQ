@@ -95,6 +95,7 @@ def _estado() -> dict:
         "periodo": periodo,
         "periodo_insumos": periodo_insumos(periodo),
         "ahora": ahora(),
+        "zona_horaria": settings.APP_TIMEZONE,
         "en_curso": en_curso,
         "insumos": lista_insumos,
         "mora": {
@@ -398,9 +399,12 @@ def _guardar_programacion(tipo: str, data: ProgramacionIn, usuario: str) -> dict
     if data.modo == "MENSUAL" and (data.dia_mes is None or not data.hora):
         raise HTTPException(422, "Indica el día del mes y la hora")
     fecha_hora = data.fecha_hora.replace(tzinfo=None, second=0, microsecond=0) if data.fecha_hora else None
-    proxima = planificador.calcular_proxima(data.modo, fecha_hora, data.dia_mes, data.hora, ahora())
+    momento = ahora()
+    proxima = planificador.calcular_proxima(data.modo, fecha_hora, data.dia_mes, data.hora, momento)
     if proxima is None:
-        raise HTTPException(422, "La fecha y hora deben ser futuras")
+        # Con la hora del servidor: si el navegador está en otra zona horaria, así se entiende el rechazo
+        raise HTTPException(422, "La fecha y hora deben ser al menos 1 minuto en el futuro "
+                                 f"(hora del servidor: {momento:%d/%m/%Y %H:%M})")
 
     repo.prog_guardar(tipo, data.modo, fecha_hora, data.dia_mes if data.modo == "MENSUAL" else None,
                       data.hora if data.modo == "MENSUAL" else None, proxima, usuario)

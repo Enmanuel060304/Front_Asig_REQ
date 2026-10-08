@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CheckCheckIcon, FileSpreadsheetIcon, Loader2Icon, LockOpenIcon } from "lucide-react"
+import { FileSpreadsheetIcon, Loader2Icon, LockOpenIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { ConfirmarAccion } from "@/components/control/confirmar-accion"
@@ -43,9 +43,11 @@ export function PasoCompletar({
   async function exportar() {
     setExportando(true)
     try {
+      if (!cierre) await api.completar() // exportar cierra el periodo si aún no está cerrado
       await api.exportar()
     } catch (err) {
-      toast.error("No se pudo exportar", { description: errorMsg(err) })
+      const motivos = err instanceof ApiError ? err.motivos : []
+      toast.error("No se pudo exportar", { description: motivos.length ? motivos.join(" · ") : errorMsg(err) })
     } finally {
       setExportando(false)
       onCambio() // la exportación queda en la bitácora
@@ -56,43 +58,30 @@ export function PasoCompletar({
     <Paso
       id="tour-completar"
       numero={numero}
-      titulo="Completar asignación"
+      titulo="Exportar asignación"
       estado={estadoCompletar(control)}
       etiquetaEstado={cierre ? "Completada" : undefined}
       ultimo
       acciones={
-        cierre ? (
-          <>
-            <Button size="sm" onClick={exportar} disabled={exportando}>
-              {exportando ? <Loader2Icon className="animate-spin" /> : <FileSpreadsheetIcon />}
-              Exportar a Excel
-            </Button>
-            <ConfirmarAccion
-              size="sm"
-              variant="outline"
-              destructiva
-              titulo="¿Reabrir la asignación?"
-              descripcion="Se volverán a habilitar la asignación manual de agencias y Regenerar. Tendrás que completarla de nuevo para exportar."
-              textoConfirmar="Reabrir"
-              onConfirmar={() => accion(api.reabrir, "Asignación reabierta", "No se pudo reabrir")}
-            >
-              <LockOpenIcon />
-              Reabrir
-            </ConfirmarAccion>
-          </>
-        ) : (
+        <>
+          <Button onClick={exportar} disabled={exportando || !(cierre || control.puede_completar)}>
+            {exportando ? <Loader2Icon className="animate-spin" /> : <FileSpreadsheetIcon />}
+            Exportar a Excel
+          </Button>
           <ConfirmarAccion
             size="sm"
-            disabled={!control.puede_completar}
-            titulo="¿Completar la asignación?"
-            descripcion="Se cerrará el periodo: ya no se podrán asignar agencias a mano ni regenerar la asignación (salvo que la reabras). Después podrás exportarla a Excel."
-            textoConfirmar="Completar"
-            onConfirmar={() => accion(api.completar, "Asignación completada", "No se pudo completar")}
+            variant="outline"
+            destructiva
+            disabled={!cierre}
+            titulo="¿Reabrir la asignación?"
+            descripcion="Se volverán a habilitar la asignación manual de agencias y Regenerar. Al exportar de nuevo se cerrará otra vez."
+            textoConfirmar="Reabrir"
+            onConfirmar={() => accion(api.reabrir, "Asignación reabierta", "No se pudo reabrir")}
           >
-            <CheckCheckIcon />
-            Completar asignación
+            <LockOpenIcon />
+            Reabrir
           </ConfirmarAccion>
-        )
+        </>
       }
     >
       {cierre ? (
@@ -119,7 +108,7 @@ export function PasoCompletar({
           </AlertDescription>
         </Alert>
       ) : (
-        <p className="text-muted-foreground">Todo listo: completa la asignación para poder exportarla a Excel.</p>
+        <p className="text-muted-foreground">Todo listo: exporta la asignación a Excel (al exportar se cierra el periodo).</p>
       )}
     </Paso>
   )

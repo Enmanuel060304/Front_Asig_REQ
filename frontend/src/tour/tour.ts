@@ -75,9 +75,9 @@ const PASOS: DriveStep[] = [
   {
     element: "#tour-completar",
     popover: {
-      title: "4. Completar asignación",
+      title: "4. Exportar asignación",
       description:
-        "Cuando no quedan equipos sin agencia, completa la asignación para cerrar el periodo y exportarla a Excel.",
+        "Cuando no quedan equipos sin agencia, exporta la asignación a Excel (cierra el periodo). Reabrir la vuelve a habilitar.",
     },
   },
   {

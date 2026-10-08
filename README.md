@@ -50,8 +50,9 @@ Mora  ┘                         Bajas y Mora OK)
    varios a la vez, eligiendo del catálogo de agencias (tabla SQL, siempre las vigentes). Revisa **toda** la tabla
    de asignación (lo nuevo y lo pendiente de periodos anteriores). La vista *Asignados a mano* permite corregir una
    asignación; se conservan al regenerar.
-5. **Paso 4 — Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo y
-   entonces **Exportar a Excel** toda la tabla de asignación.
+5. **Paso 4 — Exportar asignación**: cuando no queda ningún equipo sin agencia se habilita **Exportar a Excel** (toda la
+   tabla de asignación); al exportar se completa (cierra) el periodo, sin paso extra. **Reabrir** se habilita con el
+   periodo cerrado.
 6. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
 
 ### Reglas de negocio
@@ -86,7 +87,7 @@ Mora  ┘                         Bajas y Mora OK)
   conservan al regenerar**: al terminar el SP se reaplican a los equipos que sigan sin agencia; los que el SP ya
   asignó se respetan y la bitácora informa cuántas se reaplicaron. Pendiente de confirmar con el negocio: antes
   se perdían al regenerar. No se puede asignar mientras corre un proceso (`409`) ni con el periodo completado.
-- **Completar (cierre del periodo)**: exige asignación OK en el periodo, **0 equipos sin agencia** y ningún proceso
+- **Completar (cierre del periodo)**: ya no tiene botón; lo hace *Exportar* si el periodo aún no está cerrado. Exige asignación OK en el periodo, **0 equipos sin agencia** y ningún proceso
   en curso (se revalida en el servidor → `422` con motivos). Con el periodo completado se bloquean la asignación
   manual y *Regenerar* (`409`); se puede **Reabrir** con confirmación. La exportación solo funciona con el periodo
   completado.
@@ -163,7 +164,8 @@ npm run demo        # compila el front, levanta todo en :8000 y abre el navegado
 
 Para desarrollar el front con recarga en caliente: `npm run dev:demo` + `npm run dev:front` (en otra terminal) y abrir `:5173`.
 
-Usuario **`demo`** / contraseña **`demo`**. Usa `backend/.env.demo` (no hace falta `backend/.env`) y muestra la
+Usuario **`demo`** / contraseña **`demo`**. Usa `backend/.env.demo` (no hace falta `backend/.env`; zona horaria
+`America/Managua`) y muestra la
 etiqueta **Modo demo** en el header.
 
 - **Qué está simulado**: todo lo que toca SQL (`backend/app/repo_demo.py` reemplaza a `repo.py` con `DEMO_MODE=true`).
@@ -223,6 +225,7 @@ En Chrome/Edge aparece el ícono **Instalar app** en la barra de direcciones (o 
 | Web primero, PWA como mejora | Funciona por URL en cualquier navegador; además se instala como app, tiene caché de assets y avisos de nueva versión |
 | `/api/*` nunca se cachea en el service worker | Los datos y la sesión siempre vienen de la red |
 | Tema claro/oscuro/sistema, por defecto el del navegador | Pedido del usuario |
+| Acción principal en **azul** (`--primary`) sobre un tema gris; botones con sombra, hover que eleva y active que hunde | Affordance: que se vea al instante dónde hacer clic. Azul = convención de "clicable" y no choca con verde (OK), ámbar (Advertencia) ni rojo (Error/destructivo). Texto blanco sobre el azul ≈ 5,3:1 (AA) |
 
 ## Pendiente / ideas para siguientes fases
 

@@ -133,7 +133,9 @@ export type EstadoInsumo = {
 export type EstadoControl = {
   periodo: string
   periodo_insumos: string
+  /** Hora del servidor (sin zona, en `zona_horaria`): las programaciones se escriben en esta hora */
   ahora: string
+  zona_horaria: string
   /** Procesos corriendo: dentro del flujo los insumos se extraen a la vez */
   en_curso: ProcesoEnCurso[]
   insumos: EstadoInsumo[]

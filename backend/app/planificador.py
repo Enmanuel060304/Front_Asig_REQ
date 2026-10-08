@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 TIPOS_PROGRAMABLES = ("INSUMOS", "MORA", "EXTRAER_BAJAS", "EXTRAER_CAMBIO_TEC")  # INSUMOS = flujo completo (extraer + generar)
 INTERVALO_SEG = 30
 REINTENTO = timedelta(minutes=5)
+MINIMO_FUTURO = timedelta(minutes=1)  # una programación "una vez" debe quedar al menos 1 minuto adelante
 
 _stop = threading.Event()
 
@@ -22,7 +23,9 @@ _stop = threading.Event()
 def calcular_proxima(modo: str, fecha_hora: datetime | None, dia_mes: int | None, hora: str | None,
                      desde: datetime) -> datetime | None:
     if modo == "UNICA":
-        return fecha_hora if fecha_hora and fecha_hora > desde else None
+        # Contra el minuto en curso: programar para el minuto siguiente siempre vale
+        minimo = desde.replace(second=0, microsecond=0) + MINIMO_FUTURO
+        return fecha_hora if fecha_hora and fecha_hora >= minimo else None
     hh, mm = (int(x) for x in hora.split(":"))
     return proxima_mensual(dia_mes, time(hh, mm), desde)
 

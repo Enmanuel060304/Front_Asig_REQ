@@ -24,7 +24,7 @@ function estadoGeneral(c: EstadoControl): { estado: EstadoPaso; texto: string } 
   if (c.asignacion.proceso?.Estado === "OK") {
     return c.sin_asignar
       ? { estado: "ADVERTENCIA", texto: `Pendiente: ${c.sin_asignar} equipo(s) sin agencia` }
-      : { estado: "OK", texto: "Lista para completar" }
+      : { estado: "OK", texto: "Lista para exportar" }
   }
   if (c.puede_generar) return { estado: "OK", texto: "Lista para generar" }
   return { estado: "ADVERTENCIA", texto: `Bloqueado: ${c.bloqueos[0]}` }

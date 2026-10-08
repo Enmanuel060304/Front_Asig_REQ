@@ -240,7 +240,7 @@ function FilaInsumo({
           <div className="flex flex-wrap items-center gap-2">
             <ConfirmarAccion
               size="sm"
-              variant={listo(estado) ? "outline" : "default"}
+              variant="outline"
               disabled={ocupado}
               titulo={esMora ? "¿Ejecutar mora ahora?" : `¿Extraer ${NOMBRE[clave]} del servidor?`}
               descripcion={
@@ -273,7 +273,13 @@ function FilaInsumo({
                 {v ? "Revalidar" : "Validar"}
               </Button>
             )}
-            <ProgramarDialog tipo={tipo} actual={programacion} onGuardado={onCambio} />
+            <ProgramarDialog
+              tipo={tipo}
+              actual={programacion}
+              desfaseMs={desfaseMs}
+              zonaHoraria={control.zona_horaria}
+              onGuardado={onCambio}
+            />
           </div>
         </div>
       )}
@@ -298,7 +304,6 @@ export function PasoInsumos({ numero, control, desfaseMs, onCambio }: Comunes & 
         <>
           <ConfirmarAccion
             id="tour-extraer-insumos"
-            size="sm"
             disabled={ocupado || !!control.cierre || (generada && insumosListos(control))}
             titulo="¿Extraer los insumos y generar la asignación?"
             descripcion={
@@ -317,7 +322,13 @@ export function PasoInsumos({ numero, control, desfaseMs, onCambio }: Comunes & 
             <DatabaseZapIcon />
             Extraer y generar asignación
           </ConfirmarAccion>
-          <ProgramarDialog tipo="INSUMOS" actual={prog} onGuardado={onCambio} />
+          <ProgramarDialog
+            tipo="INSUMOS"
+            actual={prog}
+            desfaseMs={desfaseMs}
+            zonaHoraria={control.zona_horaria}
+            onGuardado={onCambio}
+          />
         </>
       }
     >
@@ -355,7 +366,6 @@ export function PasoAsignacion({ numero, control, desfaseMs, onCambio }: Comunes
       acciones={
         <ConfirmarAccion
           id="tour-ejecutar"
-          size="sm"
           variant={generada ? "outline" : "default"}
           disabled={!control.puede_generar || !!control.cierre}
           destructiva={generada}

@@ -36,13 +36,15 @@ Contexto del negocio y reglas: ver el [README raíz](../README.md). API: ver [ba
      periodo asignados a mano, con la agencia actual, para **corregirlos** (*Cambiar*). Pendiente hasta que haya
      asignación; *Advertencia* "N sin agencia" o *OK*. Cuenta como hecho con 0 pendientes. Dibuja máx. 100 filas (el
      resto, con el buscador). Con el periodo completado queda en solo lectura.
-  4. **Completar asignación** (`paso-completar.tsx`): *Completar* (deshabilitado con `bloqueos_completar`); ya
-     completada muestra quién/cuándo, **Exportar a Excel** (`api.exportar`: fetch → blob → descarga) y *Reabrir*.
+  4. **Exportar asignación** (`paso-completar.tsx`): siempre muestra **Exportar a Excel** y *Reabrir*. Exportar
+     está deshabilitado (con `bloqueos_completar`) hasta que se pueda completar; si el periodo no está cerrado, llama
+     `api.completar` y luego `api.exportar` (fetch → blob → descarga). *Reabrir* solo se habilita con el periodo
+     completado, que muestra quién/cuándo.
      Con el periodo completado, *Regenerar* del paso 2 queda deshabilitado (con el aviso "reábrela en el paso 4")
      hasta que se pulse *Reabrir*.
 - **Proceso en curso** (`proceso-progreso.tsx`): cronómetro, barra estimada con el promedio de las últimas 5
   corridas OK, fin estimado y estado de la sesión SQL.
-- **Programación** (`programacion.tsx`): el mismo diálogo sirve para el flujo completo (`tipo="INSUMOS"`, genera la asignación) y para cada insumo. Diálogo *Una vez* (fecha y hora) / *Cada mes* (día y hora), y la línea
+- **Programación** (`programacion.tsx`): el mismo diálogo sirve para el flujo completo (`tipo="INSUMOS"`, genera la asignación) y para cada insumo. Diálogo *Una vez* (fecha y hora, **en hora del servidor**: usa `desfaseMs` y muestra la zona `zona_horaria`; mínimo 1 minuto en el futuro, validado antes de enviar) / *Cada mes* (día y hora), y la línea
   con la próxima ejecución, el **último disparo** (ejecutada, omitida, en espera, fuera de tolerancia) y las
   acciones pausar/reanudar/eliminar.
 - **Bitácora** (`bitacora.tsx`).
@@ -121,4 +123,11 @@ Agregar componentes shadcn: `npx shadcn@latest add <componente>`.
 - **TanStack Table v9**: la API usa `useTable` + `tableFeatures(...)` (no `useReactTable`).
 - **Error 504 "Outdated Optimize Dep"**: pasa si se instala una dependencia con Vite corriendo o quedó un Vite viejo
   vivo en el puerto. Cerrar todos los procesos de Vite y arrancar con `npx vite --force`.
+- **Botones** (`components/ui/button.tsx`, modificado respecto al de shadcn): `default` = acción principal azul con
+  sombra (hover: más brillo y se eleva 1 px; active: se hunde), `outline` = secundaria con borde y sombra visibles,
+  `destructive` sólido (en oscuro usa el rojo del tema claro para que el texto blanco llegue a AA). `cursor-pointer`,
+  tamaños más altos (`sm` 32 px, `default` 36 px) y `motion-reduce` sin desplazamientos. Regla: **un solo botón
+  `default` por paso**; el resto, `outline`.
+- **Ves estilos viejos tras un build**: el service worker sirve los assets precacheados; recarga forzada
+  (Ctrl+Shift+R) o acepta el toast *Actualizar*.
 - **Aviso "Encountered a script tag…"** en consola: viene de `next-themes` con React 19; es inofensivo.

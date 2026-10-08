@@ -54,15 +54,32 @@ function aInputLocal(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** Mínimo para "una vez": 1 minuto después del minuto en curso del servidor (igual que valida el backend). */
+const MINIMO_FUTURO_MS = 60_000
+
+/** Hora del servidor como Date "de pared": desfaseMs (de use-control) incluye la diferencia de zona horaria. */
+const horaServidor = (desfaseMs: number) => new Date(Date.now() + desfaseMs)
+
+function minimoServidor(desfaseMs: number) {
+  const d = horaServidor(desfaseMs)
+  d.setSeconds(0, 0)
+  return new Date(d.getTime() + MINIMO_FUTURO_MS)
+}
+
 export function ProgramarDialog({
   tipo,
   actual,
   disabled,
+  desfaseMs,
+  zonaHoraria,
   onGuardado,
 }: {
   tipo: TipoProgramable
   actual: Programacion | null
   disabled?: boolean
+  /** Diferencia con el reloj del servidor: las fechas se escriben y validan en hora del servidor */
+  desfaseMs: number
+  zonaHoraria: string
   onGuardado: () => void
 }) {
   const [abierto, setAbierto] = React.useState(false)
@@ -71,12 +88,16 @@ export function ProgramarDialog({
   const [dia, setDia] = React.useState(String(actual?.DiaMes ?? 1))
   const [hora, setHora] = React.useState(actual?.Hora ?? "06:00")
   const [guardando, setGuardando] = React.useState(false)
+  const [errorFecha, setErrorFecha] = React.useState<string | null>(null)
+  const [minimo, setMinimo] = React.useState(() => minimoServidor(desfaseMs))
 
   function abrir(open: boolean) {
     if (open) {
       setModo(actual?.Modo ?? "UNICA")
-      const base = actual?.FechaHora ? new Date(actual.FechaHora) : new Date(Date.now() + 60 * 60 * 1000)
+      const base = actual?.FechaHora ? new Date(actual.FechaHora) : new Date(horaServidor(desfaseMs).getTime() + 60 * 60 * 1000)
       setFechaHora(aInputLocal(base))
+      setMinimo(minimoServidor(desfaseMs))
+      setErrorFecha(null)
       setDia(String(actual?.DiaMes ?? 1))
       setHora(actual?.Hora ?? "06:00")
     }
@@ -85,6 +106,15 @@ export function ProgramarDialog({
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
+    if (modo === "UNICA") {
+      const min = minimoServidor(desfaseMs)
+      setMinimo(min)
+      if (new Date(fechaHora) < min) {
+        setErrorFecha(`Debe ser al menos 1 minuto en el futuro: desde ${aInputLocal(min).replace("T", " ")} (hora del servidor).`)
+        return
+      }
+    }
+    setErrorFecha(null)
     const data: ProgramacionIn =
       modo === "UNICA" ? { modo, fecha_hora: fechaHora } : { modo, dia_mes: Number(dia), hora }
     setGuardando(true)
@@ -128,10 +158,23 @@ export function ProgramarDialog({
                 id="prog-fecha"
                 type="datetime-local"
                 value={fechaHora}
-                min={aInputLocal(new Date())}
-                onChange={(e) => setFechaHora(e.target.value)}
+                min={aInputLocal(minimo)}
+                onChange={(e) => {
+                  setFechaHora(e.target.value)
+                  setErrorFecha(null)
+                }}
                 required={modo === "UNICA"}
+                aria-invalid={!!errorFecha}
+                aria-describedby="prog-fecha-ayuda"
               />
+              {errorFecha ? (
+                <p id="prog-fecha-ayuda" className="text-xs text-destructive">{errorFecha}</p>
+              ) : (
+                <p id="prog-fecha-ayuda" className="text-xs text-muted-foreground">
+                  Hora del servidor ({zonaHoraria}): {aInputLocal(horaServidor(desfaseMs)).slice(11)} · mínimo 1 minuto
+                  después.
+                </p>
+              )}
             </TabsContent>
             <TabsContent value="MENSUAL" className="grid grid-cols-2 gap-3 pt-3">
               <div className="flex flex-col gap-2">
