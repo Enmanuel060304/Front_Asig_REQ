@@ -18,7 +18,7 @@ __all__ = [
     "validacion_registrar", "validacion_ultima", "bitacora_add", "bitacora_listar", "procesos_en_curso",
     "prog_listar", "prog_get", "prog_guardar", "prog_actualizar", "prog_eliminar", "prog_vencidas", "historico_periodos",
     "contar_periodos", "max_periodo", "contar_filas", "ejecutar_sp",
-    "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "asignados_manual_listar",
+    "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "equipo_editar", "asignados_manual_listar",
     "asignaciones_reaplicar", "asignacion_exportar",
     "cierre_get", "cierre_crear", "cierre_eliminar", "usuario_hash",
 ]
@@ -369,6 +369,8 @@ _MUNICIPIOS = {
     "Cali": ["Granada", "San Fernando", "Ciudad Jardín", "Tequendama"],
     "Barranquilla": ["El Prado", "Riomar", "Boston", "Alto Prado"],
 }
+_DEPARTAMENTOS = {"Bogotá": "Cundinamarca", "Medellín": "Antioquia", "Cali": "Valle del Cauca",
+                  "Barranquilla": "Atlántico"}
 _AGENCIAS = [("AG01", "Agencia Norte"), ("AG02", "Agencia Sur"), ("AG03", "Agencia Centro"),
              ("AG04", "Agencia Occidente"), ("AG05", "Agencia Oriente"), ("AG06", "Agencia Costa")]
 
@@ -385,7 +387,8 @@ def _generar_asignacion(equipos: int, sin_agencia: int) -> list[dict]:
         if n % paso == 0 and sum(f[_col_agencia()] is None for f in filas) < sin_agencia:
             barrio = _MUNICIPIOS[municipios[(n + 1) % len(municipios)]][0]  # barrio de otro municipio
             agencia = None
-        fila = {"Serie": f"SN{periodo_actual()}{n + 1:04d}", "Municipio": municipio, "Barrio": barrio,
+        fila = {"Contrato": f"CT{70000 + n * 37}", "Serie": f"SN{periodo_actual()}{n + 1:04d}",
+                "Departamento": _DEPARTAMENTOS[municipio], "Municipio": municipio, "Barrio": barrio,
                 "Direccion": f"Cra {10 + n} # {20 + n % 9}-{30 + n % 50}"}
         fila = {_col_id(): fila["Serie"], **{c: fila.get(c, f"{c} {n + 1}") for c in _visibles()}}
         fila[_col_agencia()] = agencia
@@ -423,6 +426,16 @@ def asignar_agencia(ids: list[str], agencia: str, periodo: str, usuario: str) ->
                                   "AgenciaNueva": agencia, "Usuario": usuario, "Fecha": ahora()})
                 total += 1
     return total
+
+
+def equipo_editar(id_: str, valores: dict[str, str | None]) -> dict | None:
+    with _lock:
+        f = next((f for f in _asignacion if f[_col_id()] == id_ and f[_col_agencia()] is None), None)
+        if not f:
+            return None
+        antes = {c: f.get(c) for c in valores}
+        f.update(valores)
+        return antes
 
 
 def asignados_manual_listar(periodo: str, limite: int) -> tuple[list[str], list[dict]]:

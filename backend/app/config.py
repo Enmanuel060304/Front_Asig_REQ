@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     ASIGNACION_COLUMNA_ID: str
     ASIGNACION_COLUMNA_AGENCIA: str
     ASIGNACION_COLUMNAS_VISIBLES: str  # separadas por comas
+    # Subconjunto de las visibles que el usuario puede corregir en el paso 3 (vacío = ninguna)
+    ASIGNACION_COLUMNAS_EDITABLES: str = ""
 
     # Catálogo de agencias
     AGENCIAS_TABLA: str
@@ -98,6 +100,17 @@ class Settings(BaseSettings):
         if not cols or not all(re.fullmatch(_COLUMNA_SQL, c) for c in cols):
             raise ValueError(f"{info.field_name} debe ser una lista de columnas separadas por comas")
         return ",".join(cols)
+
+    @model_validator(mode="after")
+    def validar_editables(self):
+        editables = [c.strip() for c in self.ASIGNACION_COLUMNAS_EDITABLES.split(",") if c.strip()]
+        visibles = self.ASIGNACION_COLUMNAS_VISIBLES.split(",")
+        prohibidas = {self.ASIGNACION_COLUMNA_ID, self.ASIGNACION_COLUMNA_AGENCIA}
+        if any(c not in visibles or c in prohibidas for c in editables):
+            raise ValueError("ASIGNACION_COLUMNAS_EDITABLES debe ser un subconjunto de ASIGNACION_COLUMNAS_VISIBLES "
+                             "sin la columna identificadora ni la de agencia")
+        self.ASIGNACION_COLUMNAS_EDITABLES = ",".join(editables)
+        return self
 
     @field_validator("SP_EXTRAER_BAJAS_PARAM_PERIODO", "SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO")
     @classmethod

@@ -381,6 +381,27 @@ def asignar_agencia(ids: list[str], agencia: str, periodo: str, usuario: str) ->
     return total
 
 
+def equipo_editar(id_: str, valores: dict[str, str | None]) -> dict | None:
+    """Corrige columnas editables de un equipo sin agencia. `valores` va por nombre visible (sin corchetes).
+
+    Devuelve los valores anteriores, o None si el equipo no existe o ya tiene agencia."""
+    reales = {c.strip("[]"): c for c in settings.ASIGNACION_COLUMNAS_EDITABLES.split(",") if c}
+    cols = [reales[k] for k in valores]  # el router ya validó que sean editables
+    col_id = settings.ASIGNACION_COLUMNA_ID
+    with get_connection() as conn:
+        cur = conn.cursor()
+        antes = _una(cur.execute(
+            f"SELECT {', '.join(cols)} FROM {settings.ASIGNACION_TABLA} WITH (UPDLOCK) "
+            f"WHERE {col_id} = ? AND {_sin_agencia()}", id_))
+        if not antes:
+            return None
+        cur.execute(
+            f"UPDATE {settings.ASIGNACION_TABLA} SET {', '.join(f'{c} = ?' for c in cols)} "
+            f"WHERE {col_id} = ? AND {_sin_agencia()}", *valores.values(), id_)
+        conn.commit()
+    return {k.strip("[]"): v for k, v in antes.items()}
+
+
 def asignados_manual_listar(periodo: str, limite: int) -> tuple[list[str], list[dict]]:
     """Equipos asignados a mano en el periodo. Cada fila trae `_id` y `_agencia` (valor actual de la tabla)."""
     visibles = settings.ASIGNACION_COLUMNAS_VISIBLES.split(",")

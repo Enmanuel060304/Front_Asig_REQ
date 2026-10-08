@@ -164,7 +164,8 @@ export type EstadoControl = {
  *  `_agencia` solo viene en "asignados a mano" (agencia actual). */
 export type EquipoSinAgencia = { _id: string; _agencia?: string | null } & Record<string, unknown>
 
-export type SinAsignar = { columnas: string[]; filas: EquipoSinAgencia[]; total: number }
+/** `editables`: columnas que se pueden corregir (solo en "sin agencia") */
+export type SinAsignar = { columnas: string[]; filas: EquipoSinAgencia[]; total: number; editables?: string[] }
 
 export type Cierre = { Periodo: string; Usuario: string; Fecha: string }
 
@@ -223,6 +224,8 @@ export const api = {
   agencias: () => request<Agencia[]>("GET", "/api/control/agencias"),
   asignarAgencia: (ids: string[], agencia: string) =>
     request<{ actualizados: number }>("POST", "/api/control/sin-asignar", { ids, agencia }),
+  editarEquipo: (id: string, valores: Record<string, string | null>) =>
+    request<{ actualizados: number }>("PATCH", `/api/control/sin-asignar/${encodeURIComponent(id)}`, { valores }),
   completar: () => request<Cierre>("POST", "/api/control/completar"),
   reabrir: () => request<{ ok: boolean }>("POST", "/api/control/reabrir"),
   exportar: () => descargar("/api/control/exportar", "Asignacion.xlsx"),

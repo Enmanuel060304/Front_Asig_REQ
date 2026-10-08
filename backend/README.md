@@ -221,10 +221,11 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | POST | `/api/control/completar` | Cierra el periodo (409 si ya está, 422 con `{mensaje, motivos}`) |
 | POST | `/api/control/reabrir` | Reabre el periodo |
 | GET | `/api/control/exportar` | Descarga `Asignacion_YYYYMM.xlsx` (409 si el periodo no está completado) |
-| GET | `/api/control/sin-asignar` | Equipos con agencia NULL: `{columnas, filas (con _id), total}` (máx. 5000 filas) |
+| GET | `/api/control/sin-asignar` | Equipos con agencia NULL: `{columnas, filas (con _id), total, editables}` (máx. 5000 filas) |
 | GET | `/api/control/asignados-manual` | Equipos asignados a mano en el periodo: `{columnas, filas (con _id y _agencia), total}` |
 | GET | `/api/control/agencias` | Catálogo `[{valor, nombre}]` |
 | POST | `/api/control/sin-asignar` | `{ids, agencia}` → `{actualizados}`: asigna o corrige (409 si hay proceso o periodo completado, 422 si la agencia no existe) |
+| PATCH | `/api/control/sin-asignar/{id}` | `{valores: {columna: valor}}` → `{actualizados}`: corrige columnas de `ASIGNACION_COLUMNAS_EDITABLES` de un equipo sin agencia; queda en bitácora (409 si hay proceso o periodo completado, 404 si no existe o ya tiene agencia, 422 si la columna no es editable) |
 | POST | `/api/demo/siguiente-periodo` | **Solo demo**: pasa al mes siguiente → `{periodo}` (409 si hay proceso en curso) |
 
 Documentación interactiva en `http://localhost:8000/docs`.
