@@ -482,12 +482,9 @@ def cierre_eliminar(periodo: str) -> None:
 
 # ---------- Catálogo de agencias (distritos y municipios → agencia) ----------
 
-_cat_distritos: dict[str, str] = {
-    "Bogotá - Chapinero": "Agencia Norte", "Bogotá - Suba": "Agencia Norte", "Bogotá - Kennedy": "Agencia Sur",
-    "Medellín - El Poblado": "Agencia Centro", "Medellín - Belén": "Agencia Occidente",
-    "Cali - San Fernando": "Agencia Occidente", "Cali - Ciudad Jardín": "Agencia Sur",
-    "Barranquilla - Riomar": "Agencia Costa", "Barranquilla - Boston": "Agencia Costa",
-    "Bucaramanga - Centro": "Agencia Oriente",
+_cat_distritos: dict[int, str] = {
+    1: "Agencia Norte", 2: "Agencia Norte", 3: "Agencia Sur", 4: "Agencia Centro", 5: "Agencia Occidente",
+    6: "Agencia Occidente", 7: "Agencia Sur", 8: "Agencia Costa", 9: "Agencia Costa", 10: "Agencia Oriente",
 }
 _cat_municipios: dict[int, dict] = {
     i: {"municipio": m, "agencia": a} for i, (m, a) in enumerate([
@@ -511,36 +508,30 @@ def catalogo_distritos() -> list[dict]:
         return [{"distrito": d, "agencia": a} for d, a in sorted(_cat_distritos.items())]
 
 
-def _buscar_distrito(nombre: str) -> str | None:
-    return next((d for d in _cat_distritos if d.casefold() == nombre.casefold()), None)
-
-
-def catalogo_distrito_crear(distrito: str, agencia: str, usuario: str) -> dict:
+def catalogo_distrito_crear(distrito: int, agencia: str, usuario: str) -> dict:
     with _lock:
-        if _buscar_distrito(distrito):
-            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+        if distrito in _cat_distritos:
+            raise ClaveDuplicada(f"El distrito {distrito} ya existe")
         _cat_distritos[distrito] = agencia
         return {"distrito": distrito, "agencia": agencia}
 
 
-def catalogo_distrito_actualizar(actual: str, distrito: str, agencia: str, usuario: str) -> dict:
+def catalogo_distrito_actualizar(actual: int, distrito: int, agencia: str, usuario: str) -> dict:
     with _lock:
-        clave = _buscar_distrito(actual)
-        if not clave:
-            raise NoEncontrado(f"El distrito «{actual}» no existe")
-        if distrito.casefold() != actual.casefold() and _buscar_distrito(distrito):
-            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
-        del _cat_distritos[clave]
+        if actual not in _cat_distritos:
+            raise NoEncontrado(f"El distrito {actual} no existe")
+        if distrito != actual and distrito in _cat_distritos:
+            raise ClaveDuplicada(f"El distrito {distrito} ya existe")
+        del _cat_distritos[actual]
         _cat_distritos[distrito] = agencia
         return {"distrito": distrito, "agencia": agencia}
 
 
-def catalogo_distrito_eliminar(distrito: str, usuario: str) -> dict:
+def catalogo_distrito_eliminar(distrito: int, usuario: str) -> dict:
     with _lock:
-        clave = _buscar_distrito(distrito)
-        if not clave:
-            raise NoEncontrado(f"El distrito «{distrito}» no existe")
-        return {"distrito": clave, "agencia": _cat_distritos.pop(clave)}
+        if distrito not in _cat_distritos:
+            raise NoEncontrado(f"El distrito {distrito} no existe")
+        return {"distrito": distrito, "agencia": _cat_distritos.pop(distrito)}
 
 
 def catalogo_municipios() -> list[dict]:

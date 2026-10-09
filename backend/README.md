@@ -75,8 +75,8 @@ exige sesión y `X-Requested-With`; bitácora del periodo en cada cambio.
 |---|---|---|
 | GET | `/api/catalogo/agencias` | `[{agencia, distritos, municipios}]` |
 | PUT / DELETE | `/api/catalogo/agencias/{nombre}` | Renombra (`{agencia}`) o elimina la agencia con todos sus distritos y municipios |
-| GET / POST | `/api/catalogo/distritos` | `[{distrito, agencia}]` / alta `{distrito, agencia}` (201) |
-| PUT / DELETE | `/api/catalogo/distritos/{distrito}` | Modifica o elimina |
+| GET / POST | `/api/catalogo/distritos` | `[{distrito, agencia}]` / alta `{distrito, agencia}` (201); `distrito` es un entero ≥ 1 |
+| PUT / DELETE | `/api/catalogo/distritos/{distrito:int}` | Modifica o elimina |
 | GET / POST | `/api/catalogo/municipios` | `[{id, municipio, agencia}]` / alta `{municipio, agencia}` (201) |
 | PUT / DELETE | `/api/catalogo/municipios/{id}` | Modifica o elimina |
 

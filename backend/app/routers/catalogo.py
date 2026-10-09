@@ -22,7 +22,7 @@ class _Texto(BaseModel):
 
 
 class DistritoIn(_Texto):
-    distrito: str = Texto
+    distrito: int = Field(ge=1, le=2_147_483_647)
     agencia: str = Texto
 
 
@@ -86,22 +86,22 @@ async def distritos():
 async def crear_distrito(data: DistritoIn, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_distrito_crear,
-        lambda r: f"agregó el distrito «{r['distrito']}» → {r['agencia']}", data.distrito, data.agencia, usuario)
+        lambda r: f"agregó el distrito {r['distrito']} → {r['agencia']}", data.distrito, data.agencia, usuario)
 
 
-@router.put("/distritos/{distrito:path}", dependencies=csrf)
-async def actualizar_distrito(distrito: str, data: DistritoIn, usuario: str = Depends(get_current_user)):
+@router.put("/distritos/{distrito}", dependencies=csrf)
+async def actualizar_distrito(distrito: int, data: DistritoIn, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_distrito_actualizar,
-        lambda r: f"modificó el distrito «{distrito}» → «{r['distrito']}» / {r['agencia']}",
+        lambda r: f"modificó el distrito {distrito} → {r['distrito']} / {r['agencia']}",
         distrito, data.distrito, data.agencia, usuario)
 
 
-@router.delete("/distritos/{distrito:path}", dependencies=csrf)
-async def eliminar_distrito(distrito: str, usuario: str = Depends(get_current_user)):
+@router.delete("/distritos/{distrito}", dependencies=csrf)
+async def eliminar_distrito(distrito: int, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_distrito_eliminar,
-        lambda r: f"eliminó el distrito «{r['distrito']}» (agencia {r['agencia']})", distrito, usuario)
+        lambda r: f"eliminó el distrito {r['distrito']} (agencia {r['agencia']})", distrito, usuario)
 
 
 # ---------- Municipios ----------

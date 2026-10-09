@@ -2,10 +2,11 @@
 -- SOLO DESARROLLO / DEMO. NUNCA EJECUTAR EN PRODUCCIÓN: inserta datos ficticios en el catálogo Cat.*
 -- Idempotente: cada fila se inserta solo si no existe, se puede correr varias veces.
 --
+-- Si ejecutas con sqlcmd usa -f 65001 (el archivo es UTF-8); en SSMS se abre bien.
 -- Antes de correr: pon abajo el nombre de TU base de pruebas. Si la base activa es otra, el script se detiene
 -- sin tocar nada (protección contra ejecutarlo por error en la base oficial).
 -- =====================================================================================================
-DECLARE @BD_PRUEBAS sysname = N'NombreBaseDatos';   -- <-- CAMBIAR por el nombre de la base de pruebas
+DECLARE @BD_PRUEBAS sysname = N'Asignacion_Retiro_eq';   -- <-- CAMBIAR por el nombre de la base de pruebas
 
 IF DB_NAME() <> @BD_PRUEBAS
 BEGIN
@@ -18,22 +19,17 @@ GO
 SET NOCOUNT ON;
 
 -- ---------- Cat_Asig_Distrito (DISTRITO, AGENCIA) ----------
-DECLARE @distritos TABLE (DISTRITO NVARCHAR(100), AGENCIA NVARCHAR(100));
+-- DISTRITO es un código numérico: 1-7 = distritos de Managua; 8-14 = cabeceras de otros departamentos
+DECLARE @distritos TABLE (DISTRITO INT, AGENCIA NVARCHAR(30));
 INSERT INTO @distritos VALUES
- (N'Managua - Distrito I',   N'Agencia Managua Norte'),
- (N'Managua - Distrito II',  N'Agencia Managua Norte'),
- (N'Managua - Distrito III', N'Agencia Managua Centro'),
- (N'Managua - Distrito IV',  N'Agencia Managua Centro'),
- (N'Managua - Distrito V',   N'Agencia Managua Sur'),
- (N'Managua - Distrito VI',  N'Agencia Managua Sur'),
- (N'Managua - Distrito VII', N'Agencia Managua Oriente'),
- (N'León - Casco urbano',    N'Agencia León'),
- (N'León - Sutiaba',         N'Agencia León'),
- (N'Masaya - Centro',        N'Agencia Masaya'),
- (N'Granada - Centro',       N'Agencia Granada'),
- (N'Chinandega - Centro',    N'Agencia Chinandega'),
- (N'Estelí - Centro',        N'Agencia Estelí'),
- (N'Matagalpa - Centro',     N'Agencia Matagalpa');
+ (1, N'Agencia Managua Norte'),  (2, N'Agencia Managua Norte'),
+ (3, N'Agencia Managua Centro'), (4, N'Agencia Managua Centro'),
+ (5, N'Agencia Managua Sur'),    (6, N'Agencia Managua Sur'),
+ (7, N'Agencia Managua Oriente'),
+ (8, N'Agencia León'),           (9, N'Agencia Masaya'),
+ (10, N'Agencia Granada'),       (11, N'Agencia Chinandega'),
+ (12, N'Agencia Estelí'),        (13, N'Agencia Matagalpa'),
+ (14, N'Agencia Jinotepe');
 
 INSERT INTO Cat.Cat_Asig_Distrito (DISTRITO, AGENCIA)
 SELECT d.DISTRITO, d.AGENCIA

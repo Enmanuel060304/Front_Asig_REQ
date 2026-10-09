@@ -207,7 +207,7 @@ export type ProgramacionIn =
   | { modo: "MENSUAL"; dia_mes: number; hora: string }
 
 export type AgenciaCatalogo = { agencia: string; distritos: number; municipios: number }
-export type Distrito = { distrito: string; agencia: string }
+export type Distrito = { distrito: number; agencia: string }
 export type Municipio = { id: number; municipio: string; agencia: string }
 
 const cat = (ruta: string) => `/api/catalogo/${ruta}`
@@ -255,8 +255,8 @@ export const api = {
     request<{ distritos: number; municipios: number }>("DELETE", cat(`agencias/${enc(agencia)}`)),
   distritos: () => request<Distrito[]>("GET", cat("distritos")),
   crearDistrito: (d: Distrito) => request<Distrito>("POST", cat("distritos"), d),
-  actualizarDistrito: (actual: string, d: Distrito) => request<Distrito>("PUT", cat(`distritos/${enc(actual)}`), d),
-  eliminarDistrito: (distrito: string) => request<Distrito>("DELETE", cat(`distritos/${enc(distrito)}`)),
+  actualizarDistrito: (actual: number, d: Distrito) => request<Distrito>("PUT", cat(`distritos/${enc(actual)}`), d),
+  eliminarDistrito: (distrito: number) => request<Distrito>("DELETE", cat(`distritos/${enc(distrito)}`)),
   municipios: () => request<Municipio[]>("GET", cat("municipios")),
   crearMunicipio: (m: Omit<Municipio, "id">) => request<Municipio>("POST", cat("municipios"), m),
   actualizarMunicipio: (id: number, m: Omit<Municipio, "id">) => request<Municipio>("PUT", cat(`municipios/${id}`), m),

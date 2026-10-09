@@ -467,6 +467,10 @@ def _txt(v) -> str | None:
     return None if v is None else str(v).strip()
 
 
+def _num(v) -> int | None:
+    return None if v is None else int(v)
+
+
 def _auditar(cur, tabla: str, operacion: str, clave, antes: dict | None, despues: dict | None, usuario: str) -> None:
     """Misma transacción que el cambio: o quedan los dos o ninguno."""
     cur.execute(
@@ -498,14 +502,14 @@ def catalogo_distritos() -> list[dict]:
         cur = conn.cursor().execute(
             f"SELECT {_DIS_C} AS distrito, {_AG} AS agencia FROM {_DIS} ORDER BY {_DIS_C}"
         )
-        return [{"distrito": _txt(r["distrito"]), "agencia": _txt(r["agencia"])} for r in _filas(cur)]
+        return [{"distrito": _num(r["distrito"]), "agencia": _txt(r["agencia"])} for r in _filas(cur)]
 
 
-def catalogo_distrito_crear(distrito: str, agencia: str, usuario: str) -> dict:
+def catalogo_distrito_crear(distrito: int, agencia: str, usuario: str) -> dict:
     with get_connection() as conn:
         cur = conn.cursor()
         if cur.execute(f"SELECT 1 FROM {_DIS} WITH (UPDLOCK, HOLDLOCK) WHERE {_DIS_C} = ?", distrito).fetchone():
-            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+            raise ClaveDuplicada(f"El distrito {distrito} ya existe")
         cur.execute(f"INSERT INTO {_DIS} ({_DIS_C}, {_AG}) VALUES (?, ?)", distrito, agencia)
         nuevo = {"distrito": distrito, "agencia": agencia}
         _auditar(cur, "DISTRITO", "ALTA", distrito, None, nuevo, usuario)
@@ -513,32 +517,32 @@ def catalogo_distrito_crear(distrito: str, agencia: str, usuario: str) -> dict:
         return nuevo
 
 
-def catalogo_distrito_actualizar(actual: str, distrito: str, agencia: str, usuario: str) -> dict:
+def catalogo_distrito_actualizar(actual: int, distrito: int, agencia: str, usuario: str) -> dict:
     with get_connection() as conn:
         cur = conn.cursor()
         previo = cur.execute(
             f"SELECT {_DIS_C}, {_AG} FROM {_DIS} WITH (UPDLOCK) WHERE {_DIS_C} = ?", actual).fetchone()
         if not previo:
-            raise NoEncontrado(f"El distrito «{actual}» no existe")
-        if distrito.casefold() != actual.casefold() and cur.execute(
+            raise NoEncontrado(f"El distrito {actual} no existe")
+        if distrito != actual and cur.execute(
                 f"SELECT 1 FROM {_DIS} WHERE {_DIS_C} = ?", distrito).fetchone():
-            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+            raise ClaveDuplicada(f"El distrito {distrito} ya existe")
         cur.execute(f"UPDATE {_DIS} SET {_DIS_C} = ?, {_AG} = ? WHERE {_DIS_C} = ?", distrito, agencia, actual)
         nuevo = {"distrito": distrito, "agencia": agencia}
-        _auditar(cur, "DISTRITO", "CAMBIO", actual, {"distrito": _txt(previo[0]), "agencia": _txt(previo[1])}, nuevo, usuario)
+        _auditar(cur, "DISTRITO", "CAMBIO", actual, {"distrito": _num(previo[0]), "agencia": _txt(previo[1])}, nuevo, usuario)
         conn.commit()
         return nuevo
 
 
-def catalogo_distrito_eliminar(distrito: str, usuario: str) -> dict:
+def catalogo_distrito_eliminar(distrito: int, usuario: str) -> dict:
     with get_connection() as conn:
         cur = conn.cursor()
         previo = cur.execute(
             f"SELECT {_DIS_C}, {_AG} FROM {_DIS} WITH (UPDLOCK) WHERE {_DIS_C} = ?", distrito).fetchone()
         if not previo:
-            raise NoEncontrado(f"El distrito «{distrito}» no existe")
+            raise NoEncontrado(f"El distrito {distrito} no existe")
         cur.execute(f"DELETE FROM {_DIS} WHERE {_DIS_C} = ?", distrito)
-        antes = {"distrito": _txt(previo[0]), "agencia": _txt(previo[1])}
+        antes = {"distrito": _num(previo[0]), "agencia": _txt(previo[1])}
         _auditar(cur, "DISTRITO", "BAJA", distrito, antes, None, usuario)
         conn.commit()
         return antes

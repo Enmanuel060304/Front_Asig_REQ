@@ -94,7 +94,7 @@ Mora  ┘                         Bajas y Mora OK)
 - **Excel**: una hoja con `SELECT *` de la tabla de asignación completa (ya viene trabajada por el SP: lo nuevo + los
   pendientes de periodos anteriores), columnas tal cual. Cada exportación queda en bitácora.
 - **Catálogo de agencias** (módulo `/catalogo`): una agencia no tiene tabla propia; es la columna `AGENCIA` de los
-  mapeos **Distrito → Agencia** (`Cat.Cat_Asig_Distrito`) y **Municipio → Agencia** (`Cat.Cat_Asig_Municipio`). El
+  mapeos **Distrito → Agencia** (el distrito es un código numérico) (`Cat.Cat_Asig_Distrito`) y **Municipio → Agencia** (`Cat.Cat_Asig_Municipio`). El
   módulo da de alta, modifica y elimina esas filas (y renombra o elimina una agencia completa). Eliminar es **físico**
   (`DELETE`), con confirmación; cada alta/cambio/baja queda en `AppCatalogoAuditoria` (con el antes y el después) y
   en la bitácora. **No se edita mientras corre un proceso** (`409`): el SP de asignación lee estas tablas. La lista
@@ -137,7 +137,8 @@ Mora  ┘                         Bajas y Mora OK)
    - `backend/sql/006_catalogo_vista_agencias.sql` (vista `Cat.vw_Agencias`) y `007_catalogo_auditoria.sql`
      (auditoría del catálogo). Requieren que existan las tablas `Cat.Cat_Asig_*`
    - `backend/sql/005_catalogo_datos_demo.sql` — **solo en la base de pruebas**: inserta datos ficticios en `Cat.*`.
-     Hay que poner en el script el nombre de la base de pruebas; en cualquier otra base se detiene sin tocar nada
+     Hay que poner en el script el nombre de la base de pruebas; en cualquier otra base se detiene sin tocar nada.
+     Con `sqlcmd` usar `-f 65001` (el archivo es UTF-8), si no los acentos se guardan mal
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
    mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación

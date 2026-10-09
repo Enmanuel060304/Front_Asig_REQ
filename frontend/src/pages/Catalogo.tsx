@@ -24,6 +24,7 @@ type Formulario = {
   titulo: string
   etiqueta: string
   conAgencia: boolean
+  numerico?: boolean
   nombre: string
   agencia: string
   guardar: (nombre: string, agencia: string) => Promise<unknown>
@@ -47,7 +48,7 @@ function DialogoFormulario({
     setAgencia(form?.agencia ?? "")
   }, [form])
 
-  const valido = nombre.trim() !== "" && (!form?.conAgencia || agencia.trim() !== "")
+  const valido = nombre.trim() !== "" && (!form?.numerico || /^[1-9]\d{0,8}$/.test(nombre.trim())) && (!form?.conAgencia || agencia.trim() !== "")
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault()
@@ -77,7 +78,7 @@ function DialogoFormulario({
           </DialogHeader>
           <div className="flex flex-col gap-2">
             <Label htmlFor="cat-nombre">{form?.etiqueta}</Label>
-            <Input id="cat-nombre" value={nombre} maxLength={100} onChange={(e) => setNombre(e.target.value)} autoFocus />
+            <Input id="cat-nombre" value={nombre} maxLength={form?.numerico ? 9 : 100} inputMode={form?.numerico ? "numeric" : undefined} onChange={(e) => setNombre(e.target.value)} autoFocus />
           </div>
           {form?.conAgencia && (
             <div className="flex flex-col gap-2">
@@ -208,13 +209,14 @@ export function Catalogo() {
   const abrirDistrito = (d?: Distrito) =>
     setForm({
       titulo: d ? "Editar distrito" : "Nuevo distrito",
-      etiqueta: "Distrito",
+      etiqueta: "Distrito (código numérico)",
       conAgencia: true,
-      nombre: d?.distrito ?? "",
+      numerico: true,
+      nombre: d ? String(d.distrito) : "",
       agencia: d?.agencia ?? "",
       guardar: (nombre, agencia) =>
         guardar(
-          () => (d ? api.actualizarDistrito(d.distrito, { distrito: nombre, agencia }) : api.crearDistrito({ distrito: nombre, agencia })),
+          () => (d ? api.actualizarDistrito(d.distrito, { distrito: Number(nombre), agencia }) : api.crearDistrito({ distrito: Number(nombre), agencia })),
           d ? "Distrito actualizado" : "Distrito agregado",
         ),
     })
@@ -298,7 +300,7 @@ export function Catalogo() {
           </div>
           <Tabla columnas={["Distrito", "Agencia"]} vacio={distritos.length === 0}>
             {distritos
-              .filter((d) => coincide(d.distrito, d.agencia))
+              .filter((d) => coincide(String(d.distrito), d.agencia))
               .map((d) => (
                 <TableRow key={d.distrito}>
                   <TableCell className="font-medium">{d.distrito}</TableCell>
@@ -307,7 +309,7 @@ export function Catalogo() {
                     <Acciones
                       onEditar={() => abrirDistrito(d)}
                       onEliminar={() => eliminar(() => api.eliminarDistrito(d.distrito), "Distrito eliminado")}
-                      descripcion={`Se elimina el distrito «${d.distrito}» (agencia ${d.agencia}). Queda en la auditoría.`}
+                      descripcion={`Se elimina el distrito ${d.distrito} (agencia ${d.agencia}). Queda en la auditoría.`}
                     />
                   </TableCell>
                 </TableRow>
