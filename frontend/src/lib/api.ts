@@ -206,6 +206,13 @@ export type ProgramacionIn =
   | { modo: "UNICA"; fecha_hora: string }
   | { modo: "MENSUAL"; dia_mes: number; hora: string }
 
+export type AgenciaCatalogo = { agencia: string; distritos: number; municipios: number }
+export type Distrito = { distrito: string; agencia: string }
+export type Municipio = { id: number; municipio: string; agencia: string }
+
+const cat = (ruta: string) => `/api/catalogo/${ruta}`
+const enc = encodeURIComponent
+
 export const api = {
   login: (username: string, password: string) =>
     request<{ username: string }>("POST", "/api/auth/login", { username, password }),
@@ -240,4 +247,18 @@ export const api = {
     request<Programacion>("PATCH", `/api/control/programaciones/${tipo}`, { activa }),
   eliminarProgramacion: (tipo: TipoProgramable) =>
     request<{ ok: boolean }>("DELETE", `/api/control/programaciones/${tipo}`),
+
+  catalogoAgencias: () => request<AgenciaCatalogo[]>("GET", cat("agencias")),
+  renombrarAgencia: (actual: string, agencia: string) =>
+    request<{ distritos: number; municipios: number }>("PUT", cat(`agencias/${enc(actual)}`), { agencia }),
+  eliminarAgencia: (agencia: string) =>
+    request<{ distritos: number; municipios: number }>("DELETE", cat(`agencias/${enc(agencia)}`)),
+  distritos: () => request<Distrito[]>("GET", cat("distritos")),
+  crearDistrito: (d: Distrito) => request<Distrito>("POST", cat("distritos"), d),
+  actualizarDistrito: (actual: string, d: Distrito) => request<Distrito>("PUT", cat(`distritos/${enc(actual)}`), d),
+  eliminarDistrito: (distrito: string) => request<Distrito>("DELETE", cat(`distritos/${enc(distrito)}`)),
+  municipios: () => request<Municipio[]>("GET", cat("municipios")),
+  crearMunicipio: (m: Omit<Municipio, "id">) => request<Municipio>("POST", cat("municipios"), m),
+  actualizarMunicipio: (id: number, m: Omit<Municipio, "id">) => request<Municipio>("PUT", cat(`municipios/${id}`), m),
+  eliminarMunicipio: (id: number) => request<Municipio>("DELETE", cat(`municipios/${id}`)),
 }

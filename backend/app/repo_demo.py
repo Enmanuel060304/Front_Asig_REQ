@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
+from .catalogo import ClaveDuplicada, NoEncontrado
 from .config import settings
 from .periodo import ahora, anterior, periodo_actual, periodo_insumos
 from .security import hash_password
@@ -21,6 +22,9 @@ __all__ = [
     "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "asignados_manual_listar",
     "asignaciones_reaplicar", "asignacion_exportar",
     "cierre_get", "cierre_crear", "cierre_eliminar", "usuario_hash",
+    "catalogo_agencias", "catalogo_distritos", "catalogo_distrito_crear", "catalogo_distrito_actualizar",
+    "catalogo_distrito_eliminar", "catalogo_municipios", "catalogo_municipio_crear", "catalogo_municipio_actualizar",
+    "catalogo_municipio_eliminar", "catalogo_agencia_renombrar", "catalogo_agencia_eliminar",
 ]
 
 USUARIO_DEMO = "demo"
@@ -475,6 +479,130 @@ def cierre_eliminar(periodo: str) -> None:
 
 
 # ---------- Usuarios ----------
+
+# ---------- Catálogo de agencias (distritos y municipios → agencia) ----------
+
+_cat_distritos: dict[str, str] = {
+    "Bogotá - Chapinero": "Agencia Norte", "Bogotá - Suba": "Agencia Norte", "Bogotá - Kennedy": "Agencia Sur",
+    "Medellín - El Poblado": "Agencia Centro", "Medellín - Belén": "Agencia Occidente",
+    "Cali - San Fernando": "Agencia Occidente", "Cali - Ciudad Jardín": "Agencia Sur",
+    "Barranquilla - Riomar": "Agencia Costa", "Barranquilla - Boston": "Agencia Costa",
+    "Bucaramanga - Centro": "Agencia Oriente",
+}
+_cat_municipios: dict[int, dict] = {
+    i: {"municipio": m, "agencia": a} for i, (m, a) in enumerate([
+        ("Soacha", "Agencia Sur"), ("Chía", "Agencia Norte"), ("Envigado", "Agencia Centro"),
+        ("Itagüí", "Agencia Occidente"), ("Palmira", "Agencia Sur"), ("Yumbo", "Agencia Occidente"),
+        ("Soledad", "Agencia Costa"), ("Malambo", "Agencia Costa"), ("Floridablanca", "Agencia Oriente"),
+        ("Girón", "Agencia Oriente"), ("Cartagena", "Agencia Costa"), ("Rionegro", "Agencia Centro"),
+    ], start=1)
+}
+
+
+def catalogo_agencias() -> list[dict]:
+    with _lock:
+        nombres = set(_cat_distritos.values()) | {m["agencia"] for m in _cat_municipios.values()}
+        return [{"agencia": a, "distritos": sum(v == a for v in _cat_distritos.values()),
+                 "municipios": sum(m["agencia"] == a for m in _cat_municipios.values())} for a in sorted(nombres)]
+
+
+def catalogo_distritos() -> list[dict]:
+    with _lock:
+        return [{"distrito": d, "agencia": a} for d, a in sorted(_cat_distritos.items())]
+
+
+def _buscar_distrito(nombre: str) -> str | None:
+    return next((d for d in _cat_distritos if d.casefold() == nombre.casefold()), None)
+
+
+def catalogo_distrito_crear(distrito: str, agencia: str, usuario: str) -> dict:
+    with _lock:
+        if _buscar_distrito(distrito):
+            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+        _cat_distritos[distrito] = agencia
+        return {"distrito": distrito, "agencia": agencia}
+
+
+def catalogo_distrito_actualizar(actual: str, distrito: str, agencia: str, usuario: str) -> dict:
+    with _lock:
+        clave = _buscar_distrito(actual)
+        if not clave:
+            raise NoEncontrado(f"El distrito «{actual}» no existe")
+        if distrito.casefold() != actual.casefold() and _buscar_distrito(distrito):
+            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+        del _cat_distritos[clave]
+        _cat_distritos[distrito] = agencia
+        return {"distrito": distrito, "agencia": agencia}
+
+
+def catalogo_distrito_eliminar(distrito: str, usuario: str) -> dict:
+    with _lock:
+        clave = _buscar_distrito(distrito)
+        if not clave:
+            raise NoEncontrado(f"El distrito «{distrito}» no existe")
+        return {"distrito": clave, "agencia": _cat_distritos.pop(clave)}
+
+
+def catalogo_municipios() -> list[dict]:
+    with _lock:
+        return sorted(({"id": i, **m} for i, m in _cat_municipios.items()), key=lambda m: m["municipio"])
+
+
+def _municipio_duplicado(nombre: str, excepto: int | None = None) -> bool:
+    return any(m["municipio"].casefold() == nombre.casefold() and i != excepto for i, m in _cat_municipios.items())
+
+
+def catalogo_municipio_crear(municipio: str, agencia: str, usuario: str) -> dict:
+    with _lock:
+        if _municipio_duplicado(municipio):
+            raise ClaveDuplicada(f"El municipio «{municipio}» ya existe")
+        id_ = max(_cat_municipios, default=0) + 1
+        _cat_municipios[id_] = {"municipio": municipio, "agencia": agencia}
+        return {"id": id_, "municipio": municipio, "agencia": agencia}
+
+
+def catalogo_municipio_actualizar(id_: int, municipio: str, agencia: str, usuario: str) -> dict:
+    with _lock:
+        if id_ not in _cat_municipios:
+            raise NoEncontrado(f"El municipio {id_} no existe")
+        if _municipio_duplicado(municipio, excepto=id_):
+            raise ClaveDuplicada(f"El municipio «{municipio}» ya existe")
+        _cat_municipios[id_] = {"municipio": municipio, "agencia": agencia}
+        return {"id": id_, "municipio": municipio, "agencia": agencia}
+
+
+def catalogo_municipio_eliminar(id_: int, usuario: str) -> dict:
+    with _lock:
+        if id_ not in _cat_municipios:
+            raise NoEncontrado(f"El municipio {id_} no existe")
+        return {"id": id_, **_cat_municipios.pop(id_)}
+
+
+def catalogo_agencia_renombrar(actual: str, nuevo: str, usuario: str) -> tuple[int, int]:
+    with _lock:
+        d = [k for k, v in _cat_distritos.items() if v == actual]
+        m = [i for i, v in _cat_municipios.items() if v["agencia"] == actual]
+        if not d and not m:
+            raise NoEncontrado(f"La agencia «{actual}» no existe")
+        for k in d:
+            _cat_distritos[k] = nuevo
+        for i in m:
+            _cat_municipios[i]["agencia"] = nuevo
+        return len(d), len(m)
+
+
+def catalogo_agencia_eliminar(agencia: str, usuario: str) -> tuple[int, int]:
+    with _lock:
+        d = [k for k, v in _cat_distritos.items() if v == agencia]
+        m = [i for i, v in _cat_municipios.items() if v["agencia"] == agencia]
+        if not d and not m:
+            raise NoEncontrado(f"La agencia «{agencia}» no existe")
+        for k in d:
+            del _cat_distritos[k]
+        for i in m:
+            del _cat_municipios[i]
+        return len(d), len(m)
+
 
 _HASH_DEMO = hash_password(PASSWORD_DEMO)
 

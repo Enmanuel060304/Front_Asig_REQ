@@ -3,7 +3,9 @@ import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import field_validator
+from typing import Literal
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,6 +28,8 @@ class Settings(BaseSettings):
     DB_DRIVER: str = "ODBC Driver 18 for SQL Server"
     DB_ENCRYPT: str = "yes"
     DB_TRUST_SERVER_CERTIFICATE: str = "yes"
+    # Cadena ODBC completa; si viene, reemplaza a las variables DB_* de arriba (p. ej. autenticación integrada)
+    DB_CONNECTION_STRING: str = ""
 
     # Insumo: Bajas
     BAJAS_TABLA: str
@@ -61,6 +65,14 @@ class Settings(BaseSettings):
     AGENCIAS_COLUMNA_VALOR: str  # lo que se escribe en la asignación
     AGENCIAS_COLUMNA_NOMBRE: str  # lo que ve el usuario
 
+    # Mantenimiento del catálogo (mapeos distrito/municipio → agencia)
+    CATALOGO_DISTRITO_TABLA: str = "Cat.Cat_Asig_Distrito"
+    CATALOGO_DISTRITO_COLUMNA: str = "DISTRITO"
+    CATALOGO_MUNICIPIO_TABLA: str = "Cat.Cat_Asig_Municipio"
+    CATALOGO_MUNICIPIO_COLUMNA_ID: str = "ID"
+    CATALOGO_MUNICIPIO_COLUMNA: str = "MUNICIPIO"
+    CATALOGO_COLUMNA_AGENCIA: str = "AGENCIA"
+
     # Programación
     APP_TIMEZONE: str = "America/Managua"
     PROGRAMACION_TOLERANCIA_MIN: int = 120
@@ -71,12 +83,13 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
 
     # App
+    APP_ENV: Literal["development", "production"] = "development"
     DEMO_MODE: bool = False  # True = repo en memoria con datos ficticios, sin SQL Server
     FRONTEND_ORIGIN: str = "http://localhost:5173"
 
     @field_validator("BAJAS_TABLA", "CAMBIO_TEC_TABLA", "MORA_TABLA",
                      "SP_EXTRAER_BAJAS", "SP_EXTRAER_CAMBIO_TEC", "SP_MORA", "SP_ASIGNACION",
-                     "ASIGNACION_TABLA", "AGENCIAS_TABLA")
+                     "ASIGNACION_TABLA", "AGENCIAS_TABLA", "CATALOGO_DISTRITO_TABLA", "CATALOGO_MUNICIPIO_TABLA")
     @classmethod
     def validar_objeto(cls, v: str, info) -> str:
         if not re.fullmatch(_OBJETO_SQL, v):
@@ -84,7 +97,9 @@ class Settings(BaseSettings):
         return v
 
     @field_validator("BAJAS_COLUMNA_PERIODO", "CAMBIO_TEC_COLUMNA_PERIODO", "ASIGNACION_COLUMNA_ID",
-                     "ASIGNACION_COLUMNA_AGENCIA", "AGENCIAS_COLUMNA_VALOR", "AGENCIAS_COLUMNA_NOMBRE")
+                     "ASIGNACION_COLUMNA_AGENCIA", "AGENCIAS_COLUMNA_VALOR", "AGENCIAS_COLUMNA_NOMBRE",
+                     "CATALOGO_DISTRITO_COLUMNA", "CATALOGO_MUNICIPIO_COLUMNA_ID", "CATALOGO_MUNICIPIO_COLUMNA",
+                     "CATALOGO_COLUMNA_AGENCIA")
     @classmethod
     def validar_columna(cls, v: str, info) -> str:
         if not re.fullmatch(_COLUMNA_SQL, v):
@@ -116,6 +131,21 @@ class Settings(BaseSettings):
     @classmethod
     def puerto_vacio(cls, v):
         return None if v == "" else v
+
+    @model_validator(mode="after")
+    def validar_produccion(self):
+        """Un .env de pruebas copiado por error a producción debe fallar al arrancar, no en silencio."""
+        if self.APP_ENV == "production":
+            problemas = []
+            if self.DEMO_MODE:
+                problemas.append("DEMO_MODE debe ser false")
+            if not self.COOKIE_SECURE:
+                problemas.append("COOKIE_SECURE debe ser true (HTTPS)")
+            if len(self.JWT_SECRET) < 32 or self.JWT_SECRET.startswith("cambia-esto"):
+                problemas.append("JWT_SECRET debe ser un secreto aleatorio de al menos 32 caracteres")
+            if problemas:
+                raise ValueError("APP_ENV=production no es seguro: " + "; ".join(problemas))
+        return self
 
 
 settings = Settings()

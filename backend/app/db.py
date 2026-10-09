@@ -6,6 +6,8 @@ from .config import settings
 
 
 def _connection_string() -> str:
+    if settings.DB_CONNECTION_STRING:
+        return settings.DB_CONNECTION_STRING
     server = settings.DB_SERVER if settings.DB_PORT is None else f"{settings.DB_SERVER},{settings.DB_PORT}"
     return (
         f"DRIVER={{{settings.DB_DRIVER}}};"

@@ -93,6 +93,14 @@ Mora  ┘                         Bajas y Mora OK)
   completado.
 - **Excel**: una hoja con `SELECT *` de la tabla de asignación completa (ya viene trabajada por el SP: lo nuevo + los
   pendientes de periodos anteriores), columnas tal cual. Cada exportación queda en bitácora.
+- **Catálogo de agencias** (módulo `/catalogo`): una agencia no tiene tabla propia; es la columna `AGENCIA` de los
+  mapeos **Distrito → Agencia** (`Cat.Cat_Asig_Distrito`) y **Municipio → Agencia** (`Cat.Cat_Asig_Municipio`). El
+  módulo da de alta, modifica y elimina esas filas (y renombra o elimina una agencia completa). Eliminar es **físico**
+  (`DELETE`), con confirmación; cada alta/cambio/baja queda en `AppCatalogoAuditoria` (con el antes y el después) y
+  en la bitácora. **No se edita mientras corre un proceso** (`409`): el SP de asignación lee estas tablas. La lista
+  de agencias del paso 3 sale de la vista `Cat.vw_Agencias` (las agencias distintas de ambas tablas), así que un
+  cambio en el catálogo se refleja de inmediato. `Cat_Asig_Gt_Visitas` y `Cat_Asig_TIPO` solo las lee el SP; la app no
+  las edita.
 - **Programaciones vencidas**: si no pudieron ejecutarse dentro de `PROGRAMACION_TOLERANCIA_MIN` (120 min por
   defecto) — servidor apagado u otro proceso en curso — se registran como no ejecutadas.
 
@@ -126,6 +134,10 @@ Mora  ┘                         Bajas y Mora OK)
    - `backend/sql/002_control.sql` (procesos, validaciones, bitácora y programaciones)
    - `backend/sql/003_cierre.sql` (periodos completados)
    - `backend/sql/004_asignaciones_manuales.sql` (historial de agencias asignadas a mano)
+   - `backend/sql/006_catalogo_vista_agencias.sql` (vista `Cat.vw_Agencias`) y `007_catalogo_auditoria.sql`
+     (auditoría del catálogo). Requieren que existan las tablas `Cat.Cat_Asig_*`
+   - `backend/sql/005_catalogo_datos_demo.sql` — **solo en la base de pruebas**: inserta datos ficticios en `Cat.*`.
+     Hay que poner en el script el nombre de la base de pruebas; en cualquier otra base se detiene sin tocar nada
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
    mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación
@@ -198,6 +210,41 @@ npm start           # FastAPI sirve la API y el frontend en :8000
 
 Sirve detrás de HTTPS (IIS/nginx) para que la PWA sea instalable y las cookies `Secure` funcionen.
 En Chrome/Edge aparece el ícono **Instalar app** en la barra de direcciones (o la opción "Instalar app" en el menú lateral).
+
+## Entornos y paso de pruebas a producción
+
+**Cómo está armada la conexión.** Un solo punto de cambio por entorno: el archivo `.env` que se elige con
+`ENV_FILE` (`.env` por defecto, `.env.demo`, `.env.production`…). `config.py` lee y valida todo; `db.py` arma la
+conexión (variables `DB_*` o, si existe, `DB_CONNECTION_STRING`); solo `repo.py` escribe SQL, y los nombres de tablas,
+vistas y SPs (incluidas las del catálogo `CATALOGO_*`) vienen de variables. Por eso pasar de la base local a la
+oficial es **cambiar de archivo `.env`, no de código**. Con `APP_ENV=production` la app no arranca si `DEMO_MODE=true`,
+`COOKIE_SECURE=false` o `JWT_SECRET` es corto/de ejemplo: un `.env` de pruebas copiado por error falla al inicio.
+Plantilla: `backend/.env.production.example`. Los `.env.*` reales no se versionan (`.gitignore`).
+
+```powershell
+# desarrollo contra el SQL Server local
+$env:ENV_FILE=".env.development"; npm run dev:back
+```
+
+### Checklist del día de la migración a producción
+
+1. **Respaldo** de la base oficial (y de las tablas `Cat.*`) antes de tocar nada.
+2. Crear `backend/.env.production` desde `.env.production.example`: `APP_ENV=production`, `DEMO_MODE=false`,
+   `COOKIE_SECURE=true`, `JWT_SECRET` nuevo (`secrets.token_urlsafe(64)`), `FRONTEND_ORIGIN` real. **Nunca** copiar el `.env` de pruebas.
+3. Usuario SQL **dedicado y mínimo**: `SELECT/INSERT/UPDATE/DELETE` solo en `Cat_Asig_Distrito` y
+   `Cat_Asig_Municipio`; `SELECT` en el resto de insumos; `EXEC` de los SPs; `INSERT/UPDATE` en las tablas `App*`. Sin `db_owner`.
+4. Comparar el esquema real con el local (`INFORMATION_SCHEMA.COLUMNS` de las 4 tablas `Cat.*`): columnas, tipos, PK e
+   `IDENTITY` de `ID`. Si algún nombre difiere, ajustar `CATALOGO_*` en el `.env.production` (no el código).
+5. Ejecutar en la base oficial **solo** `001`–`004`, `006` y `007`. **Nunca `005`** (datos ficticios; además se
+   detiene si la base no es la de pruebas).
+6. Verificar `Cat.vw_Agencias` (`SELECT * FROM Cat.vw_Agencias`) contra las agencias reales.
+7. Instalar ODBC Driver 18; abrir el puerto hacia SQL Server; certificado válido (`DB_TRUST_SERVER_CERTIFICATE=no`) o `DB_CONNECTION_STRING`.
+8. Servicio permanente (NSSM) con `ENV_FILE=.env.production`, **un solo worker**, detrás de HTTPS.
+9. Humo: iniciar sesión; `GET /api/catalogo/agencias` (solo lectura); en una ventana acordada, alta y baja de un
+   distrito de prueba y revisar `AppCatalogoAuditoria`; abrir Control de asignación y comprobar el combobox del paso 3.
+10. Reversa: restaurar el respaldo y volver al `.env` anterior; `AppCatalogoAuditoria` (JSON del antes/después)
+    permite recuperar filas borradas una a una.
+11. Primeras 24 h: revisar bitácora y auditoría.
 
 ## Seguridad
 

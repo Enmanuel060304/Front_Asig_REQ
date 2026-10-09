@@ -18,12 +18,14 @@ backend/
 │   ├── repo.py          # TODO el SQL: tablas de la app + objetos de negocio (SPs, insumos)
 │   ├── repo_demo.py     # Misma interfaz que repo.py pero en memoria (modo demo, DEMO_MODE=true)
 │   ├── insumos.py       # Definición de Bajas / Cambio de tecnología y su validación
+│   ├── catalogo.py      # Errores del catálogo (ClaveDuplicada, NoEncontrado) compartidos por repo, repo_demo y router
 │   ├── exportar.py      # Tabla de asignación → .xlsx (openpyxl write_only)
 │   ├── procesos.py      # Ejecutor en segundo plano (una operación a la vez) y flujo extraer (en paralelo) + generar
 │   ├── planificador.py  # Hilo que dispara las programaciones vencidas cada 30 s
 │   └── routers/
 │       ├── auth.py      # /api/auth: login, logout, me
 │       ├── control.py   # /api/control: estado del periodo, acciones, historial, programaciones
+│       ├── catalogo.py  # /api/catalogo: CRUD de agencias, distritos y municipios
 │       └── demo.py      # /api/demo: siguiente periodo (solo se incluye con DEMO_MODE=true)
 ├── scripts/create_user.py   # Crea/actualiza un usuario (hash bcrypt)
 ├── scripts/demo.py          # Arranca el backend en modo demo (ENV_FILE=.env.demo) y abre el navegador
@@ -31,8 +33,12 @@ backend/
 │   ├── 001_tablas_app.sql   # AppUsuarios
 │   ├── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
 │   ├── 003_cierre.sql       # AppCierres
-│   └── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
+│   ├── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
+│   ├── 005_catalogo_datos_demo.sql    # SOLO pruebas: datos ficticios en Cat.* (se detiene si la base no es la de pruebas)
+│   ├── 006_catalogo_vista_agencias.sql # Cat.vw_Agencias (también producción)
+│   └── 007_catalogo_auditoria.sql     # AppCatalogoAuditoria (también producción)
 ├── .env.example             # Plantilla documentada de configuración
+├── .env.production.example  # Plantilla de producción (el .env.production real no se versiona)
 ├── .env.demo                # Configuración ficticia del modo demo (sí se versiona)
 └── requirements.txt
 ```
@@ -55,6 +61,27 @@ cronómetros, planificador ni "Procesos por día". `POST /api/demo/siguiente-per
 Bajas y Cambio de tecnología varían sobre el periodo anterior (a veces más del umbral); la Mora y los equipos sobre
 el último proceso OK de un periodo anterior (`_filas_previas`), sin superarlo; los sin agencia sobre los asignados a
 mano del periodo anterior (`_manuales_previos`), con algún salto.
+
+## Catálogo de agencias (`/api/catalogo`)
+
+Mantiene los mapeos Distrito→Agencia y Municipio→Agencia (ver [README raíz](../README.md)). Funciones `catalogo_*` en
+`repo.py` (y gemelas en `repo_demo.py`); tablas y columnas desde `CATALOGO_*` en `.env`. Cada escritura es una
+transacción que incluye su fila en `AppCatalogoAuditoria`. El `ID` de municipio se detecta en ejecución: si la columna
+es `IDENTITY` se deja a SQL Server; si no, se usa `MAX(ID)+1` con `UPDLOCK, HOLDLOCK`. Reglas del router: `409` si hay
+un proceso en curso (`procesos.ocupado()`) o la clave ya existe; `404` si no existe; `422` si un campo viene vacío;
+exige sesión y `X-Requested-With`; bitácora del periodo en cada cambio.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/catalogo/agencias` | `[{agencia, distritos, municipios}]` |
+| PUT / DELETE | `/api/catalogo/agencias/{nombre}` | Renombra (`{agencia}`) o elimina la agencia con todos sus distritos y municipios |
+| GET / POST | `/api/catalogo/distritos` | `[{distrito, agencia}]` / alta `{distrito, agencia}` (201) |
+| PUT / DELETE | `/api/catalogo/distritos/{distrito}` | Modifica o elimina |
+| GET / POST | `/api/catalogo/municipios` | `[{id, municipio, agencia}]` / alta `{municipio, agencia}` (201) |
+| PUT / DELETE | `/api/catalogo/municipios/{id}` | Modifica o elimina |
+
+**Entornos**: `APP_ENV` (`development`/`production`) y `DB_CONNECTION_STRING` opcional (reemplaza a `DB_*`). Con
+`production`, `config.py` rechaza `DEMO_MODE=true`, `COOKIE_SECURE=false` y un `JWT_SECRET` corto o de ejemplo.
 
 ## Procesos en segundo plano (`procesos.py`)
 
@@ -241,6 +268,7 @@ Documentación interactiva en `http://localhost:8000/docs`.
 | `AppBitacora` | Eventos del periodo (nivel `info`/`ok`/`warn`/`error`, mensaje, usuario) |
 | `AppProgramaciones` | Una fila por tipo: modo, fecha/día/hora, activa, próxima ejecución, vencimiento original, último disparo y su resultado |
 | `AppCierres` | Periodos completados: periodo, usuario, fecha (`003_cierre.sql`) |
+| `AppCatalogoAuditoria` | Alta/cambio/baja del catálogo: tabla, operación, clave, JSON antes/después, usuario, fecha (`007_catalogo_auditoria.sql`) |
 | `AppAsignacionesManuales` | Historial de agencias asignadas a mano: periodo, equipo, agencia anterior/nueva, usuario, fecha; la vigente es la de `Id` mayor (`004_asignaciones_manuales.sql`) |
 
 Las fechas se guardan en **hora local** de `APP_TIMEZONE`, sin zona horaria. `002_control.sql` es idempotente

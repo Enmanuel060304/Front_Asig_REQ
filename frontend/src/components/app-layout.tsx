@@ -9,6 +9,7 @@ import { iniciarTourSiPrimeraVez } from "@/tour/tour"
 const TITULOS: Record<string, string> = {
   "/": "Dashboard",
   "/control": "Control de asignación",
+  "/catalogo": "Catálogo de agencias",
 }
 
 export function AppLayout() {

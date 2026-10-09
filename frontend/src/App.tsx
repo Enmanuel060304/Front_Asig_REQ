@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 
 import { AuthProvider, useAuth } from "@/auth/AuthContext"
 import { AppLayout } from "@/components/app-layout"
+import { Catalogo } from "@/pages/Catalogo"
 import { Dashboard } from "@/pages/Dashboard"
 import { ControlAsignacion } from "@/pages/ControlAsignacion"
 import { Login } from "@/pages/Login"
@@ -25,6 +26,7 @@ function Rutas() {
       <Route element={<AppLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="control" element={<ControlAsignacion />} />
+        <Route path="catalogo" element={<Catalogo />} />
         <Route path="generar" element={<Navigate to="/control" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

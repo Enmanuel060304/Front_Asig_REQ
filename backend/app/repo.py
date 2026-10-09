@@ -1,7 +1,9 @@
 """Acceso a SQL Server: tablas de la app (procesos, validaciones, bitácora, programaciones)
 y operaciones sobre los objetos de negocio (SPs e insumos)."""
+import json
 from datetime import datetime
 
+from .catalogo import ClaveDuplicada, NoEncontrado
 from .config import settings
 from .db import get_connection
 from .periodo import ahora
@@ -452,7 +454,186 @@ def cierre_eliminar(periodo: str) -> None:
         conn.commit()
 
 
-# ---------- Usuarios ----------
+# ---------- Catálogo de agencias (mapeos distrito/municipio → agencia) ----------
+# Las tablas y columnas salen de settings (CATALOGO_*): en producción pueden tener otro nombre sin tocar este código.
+
+_DIS, _DIS_C = settings.CATALOGO_DISTRITO_TABLA, settings.CATALOGO_DISTRITO_COLUMNA
+_MUN, _MUN_ID, _MUN_C = (settings.CATALOGO_MUNICIPIO_TABLA, settings.CATALOGO_MUNICIPIO_COLUMNA_ID,
+                         settings.CATALOGO_MUNICIPIO_COLUMNA)
+_AG = settings.CATALOGO_COLUMNA_AGENCIA
+
+
+def _txt(v) -> str | None:
+    return None if v is None else str(v).strip()
+
+
+def _auditar(cur, tabla: str, operacion: str, clave, antes: dict | None, despues: dict | None, usuario: str) -> None:
+    """Misma transacción que el cambio: o quedan los dos o ninguno."""
+    cur.execute(
+        "INSERT INTO dbo.AppCatalogoAuditoria (Tabla, Operacion, Clave, Antes, Despues, Usuario, Fecha) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        tabla, operacion, str(clave),
+        None if antes is None else json.dumps(antes, ensure_ascii=False),
+        None if despues is None else json.dumps(despues, ensure_ascii=False),
+        usuario, ahora(),
+    )
+
+
+def catalogo_agencias() -> list[dict]:
+    """Cada agencia con cuántos distritos y municipios tiene asignados."""
+    with get_connection() as conn:
+        cur = conn.cursor().execute(
+            f"SELECT a.agencia, "
+            f"(SELECT COUNT(*) FROM {_DIS} d WHERE LTRIM(RTRIM(d.{_AG})) = a.agencia) AS distritos, "
+            f"(SELECT COUNT(*) FROM {_MUN} m WHERE LTRIM(RTRIM(m.{_AG})) = a.agencia) AS municipios "
+            f"FROM (SELECT LTRIM(RTRIM({_AG})) AS agencia FROM {_DIS} WHERE {_AG} IS NOT NULL "
+            f"      UNION SELECT LTRIM(RTRIM({_AG})) FROM {_MUN} WHERE {_AG} IS NOT NULL) a "
+            f"WHERE a.agencia <> '' ORDER BY a.agencia"
+        )
+        return [{"agencia": r["agencia"], "distritos": r["distritos"], "municipios": r["municipios"]} for r in _filas(cur)]
+
+
+def catalogo_distritos() -> list[dict]:
+    with get_connection() as conn:
+        cur = conn.cursor().execute(
+            f"SELECT {_DIS_C} AS distrito, {_AG} AS agencia FROM {_DIS} ORDER BY {_DIS_C}"
+        )
+        return [{"distrito": _txt(r["distrito"]), "agencia": _txt(r["agencia"])} for r in _filas(cur)]
+
+
+def catalogo_distrito_crear(distrito: str, agencia: str, usuario: str) -> dict:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if cur.execute(f"SELECT 1 FROM {_DIS} WITH (UPDLOCK, HOLDLOCK) WHERE {_DIS_C} = ?", distrito).fetchone():
+            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+        cur.execute(f"INSERT INTO {_DIS} ({_DIS_C}, {_AG}) VALUES (?, ?)", distrito, agencia)
+        nuevo = {"distrito": distrito, "agencia": agencia}
+        _auditar(cur, "DISTRITO", "ALTA", distrito, None, nuevo, usuario)
+        conn.commit()
+        return nuevo
+
+
+def catalogo_distrito_actualizar(actual: str, distrito: str, agencia: str, usuario: str) -> dict:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        previo = cur.execute(
+            f"SELECT {_DIS_C}, {_AG} FROM {_DIS} WITH (UPDLOCK) WHERE {_DIS_C} = ?", actual).fetchone()
+        if not previo:
+            raise NoEncontrado(f"El distrito «{actual}» no existe")
+        if distrito.casefold() != actual.casefold() and cur.execute(
+                f"SELECT 1 FROM {_DIS} WHERE {_DIS_C} = ?", distrito).fetchone():
+            raise ClaveDuplicada(f"El distrito «{distrito}» ya existe")
+        cur.execute(f"UPDATE {_DIS} SET {_DIS_C} = ?, {_AG} = ? WHERE {_DIS_C} = ?", distrito, agencia, actual)
+        nuevo = {"distrito": distrito, "agencia": agencia}
+        _auditar(cur, "DISTRITO", "CAMBIO", actual, {"distrito": _txt(previo[0]), "agencia": _txt(previo[1])}, nuevo, usuario)
+        conn.commit()
+        return nuevo
+
+
+def catalogo_distrito_eliminar(distrito: str, usuario: str) -> dict:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        previo = cur.execute(
+            f"SELECT {_DIS_C}, {_AG} FROM {_DIS} WITH (UPDLOCK) WHERE {_DIS_C} = ?", distrito).fetchone()
+        if not previo:
+            raise NoEncontrado(f"El distrito «{distrito}» no existe")
+        cur.execute(f"DELETE FROM {_DIS} WHERE {_DIS_C} = ?", distrito)
+        antes = {"distrito": _txt(previo[0]), "agencia": _txt(previo[1])}
+        _auditar(cur, "DISTRITO", "BAJA", distrito, antes, None, usuario)
+        conn.commit()
+        return antes
+
+
+def catalogo_municipios() -> list[dict]:
+    with get_connection() as conn:
+        cur = conn.cursor().execute(
+            f"SELECT {_MUN_ID} AS id, {_MUN_C} AS municipio, {_AG} AS agencia FROM {_MUN} ORDER BY {_MUN_C}"
+        )
+        return [{"id": r["id"], "municipio": _txt(r["municipio"]), "agencia": _txt(r["agencia"])} for r in _filas(cur)]
+
+
+def _municipio_id_es_identity(cur) -> bool:
+    return bool(cur.execute("SELECT COLUMNPROPERTY(OBJECT_ID(?), ?, 'IsIdentity')", _MUN, _MUN_ID.strip("[]")).fetchval())
+
+
+def catalogo_municipio_crear(municipio: str, agencia: str, usuario: str) -> dict:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if cur.execute(f"SELECT 1 FROM {_MUN} WITH (UPDLOCK, HOLDLOCK) WHERE {_MUN_C} = ?", municipio).fetchone():
+            raise ClaveDuplicada(f"El municipio «{municipio}» ya existe")
+        if _municipio_id_es_identity(cur):
+            id_ = cur.execute(
+                f"INSERT INTO {_MUN} ({_MUN_C}, {_AG}) OUTPUT INSERTED.{_MUN_ID} VALUES (?, ?)", municipio, agencia
+            ).fetchval()
+        else:  # sin IDENTITY: el siguiente número, bloqueando la tabla para que dos altas no choquen
+            id_ = cur.execute(
+                f"INSERT INTO {_MUN} ({_MUN_ID}, {_MUN_C}, {_AG}) OUTPUT INSERTED.{_MUN_ID} "
+                f"SELECT ISNULL(MAX({_MUN_ID}), 0) + 1, ?, ? FROM {_MUN} WITH (UPDLOCK, HOLDLOCK)", municipio, agencia
+            ).fetchval()
+        nuevo = {"id": id_, "municipio": municipio, "agencia": agencia}
+        _auditar(cur, "MUNICIPIO", "ALTA", id_, None, nuevo, usuario)
+        conn.commit()
+        return nuevo
+
+
+def catalogo_municipio_actualizar(id_: int, municipio: str, agencia: str, usuario: str) -> dict:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        previo = cur.execute(
+            f"SELECT {_MUN_C}, {_AG} FROM {_MUN} WITH (UPDLOCK) WHERE {_MUN_ID} = ?", id_).fetchone()
+        if not previo:
+            raise NoEncontrado(f"El municipio {id_} no existe")
+        if cur.execute(f"SELECT 1 FROM {_MUN} WHERE {_MUN_C} = ? AND {_MUN_ID} <> ?", municipio, id_).fetchone():
+            raise ClaveDuplicada(f"El municipio «{municipio}» ya existe")
+        cur.execute(f"UPDATE {_MUN} SET {_MUN_C} = ?, {_AG} = ? WHERE {_MUN_ID} = ?", municipio, agencia, id_)
+        nuevo = {"id": id_, "municipio": municipio, "agencia": agencia}
+        _auditar(cur, "MUNICIPIO", "CAMBIO", id_, {"id": id_, "municipio": _txt(previo[0]), "agencia": _txt(previo[1])},
+                 nuevo, usuario)
+        conn.commit()
+        return nuevo
+
+
+def catalogo_municipio_eliminar(id_: int, usuario: str) -> dict:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        previo = cur.execute(
+            f"SELECT {_MUN_C}, {_AG} FROM {_MUN} WITH (UPDLOCK) WHERE {_MUN_ID} = ?", id_).fetchone()
+        if not previo:
+            raise NoEncontrado(f"El municipio {id_} no existe")
+        cur.execute(f"DELETE FROM {_MUN} WHERE {_MUN_ID} = ?", id_)
+        antes = {"id": id_, "municipio": _txt(previo[0]), "agencia": _txt(previo[1])}
+        _auditar(cur, "MUNICIPIO", "BAJA", id_, antes, None, usuario)
+        conn.commit()
+        return antes
+
+
+def catalogo_agencia_renombrar(actual: str, nuevo: str, usuario: str) -> tuple[int, int]:
+    """Cambia el nombre de la agencia en todos sus distritos y municipios. Devuelve (distritos, municipios)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        d = cur.execute(f"UPDATE {_DIS} SET {_AG} = ? WHERE LTRIM(RTRIM({_AG})) = ?", nuevo, actual).rowcount
+        m = cur.execute(f"UPDATE {_MUN} SET {_AG} = ? WHERE LTRIM(RTRIM({_AG})) = ?", nuevo, actual).rowcount
+        if d + m == 0:
+            raise NoEncontrado(f"La agencia «{actual}» no existe")
+        _auditar(cur, "AGENCIA", "CAMBIO", actual, {"agencia": actual, "distritos": d, "municipios": m},
+                 {"agencia": nuevo}, usuario)
+        conn.commit()
+        return d, m
+
+
+def catalogo_agencia_eliminar(agencia: str, usuario: str) -> tuple[int, int]:
+    """Quita la agencia borrando todos sus distritos y municipios. Devuelve (distritos, municipios)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        d = cur.execute(f"DELETE FROM {_DIS} WHERE LTRIM(RTRIM({_AG})) = ?", agencia).rowcount
+        m = cur.execute(f"DELETE FROM {_MUN} WHERE LTRIM(RTRIM({_AG})) = ?", agencia).rowcount
+        if d + m == 0:
+            raise NoEncontrado(f"La agencia «{agencia}» no existe")
+        _auditar(cur, "AGENCIA", "BAJA", agencia, {"agencia": agencia, "distritos": d, "municipios": m}, None, usuario)
+        conn.commit()
+        return d, m
+
+
 
 def usuario_hash(username: str) -> str | None:
     with get_connection() as conn:

@@ -12,6 +12,7 @@ Contexto del negocio y reglas: ver el [README raíz](../README.md). API: ver [ba
 | (sin sesión) | `pages/Login.tsx` | Usuario y contraseña |
 | `/` | `pages/Dashboard.tsx` | Cards del periodo (asignación, mora), **insumos por periodo** y **equipos asignados a mano** (últimos 12 periodos), gráfico de procesos por día, historial con filtro por tipo |
 | `/control` | `pages/ControlAsignacion.tsx` | Control del periodo: los 4 pasos, bitácora y programaciones |
+| `/catalogo` | `pages/Catalogo.tsx` | Catálogo de agencias: pestañas *Agencias* (renombrar/eliminar), *Distritos* y *Municipios* (alta, edición, baja con confirmación), buscador. La agencia se elige de las existentes o se escribe una nueva (`datalist`). Si hay un proceso en curso el servidor responde 409 y se avisa con un toast |
 | `/generar` | — | Redirige a `/control` (ruta anterior) |
 
 ### Control de asignación

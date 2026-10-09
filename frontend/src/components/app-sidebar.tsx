@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Link } from "react-router-dom"
-import { CircleHelpIcon, DownloadIcon, LayoutDashboardIcon, ListChecksIcon, WorkflowIcon } from "lucide-react"
+import { BuildingIcon, CircleHelpIcon, DownloadIcon, LayoutDashboardIcon, ListChecksIcon, WorkflowIcon } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
@@ -20,6 +20,7 @@ import {
 const navMain = [
   { title: "Dashboard", url: "/", icon: <LayoutDashboardIcon /> },
   { title: "Control de asignación", url: "/control", icon: <ListChecksIcon />, id: "tour-nav-control" },
+  { title: "Catálogo de agencias", url: "/catalogo", icon: <BuildingIcon /> },
 ]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
