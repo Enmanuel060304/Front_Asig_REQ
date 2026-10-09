@@ -4,7 +4,7 @@ from datetime import datetime
 
 from .config import settings
 from .db import get_connection
-from .periodo import ahora
+from .periodo import ahora, periodo_actual
 
 
 def _filas(cur) -> list[dict]:
@@ -312,8 +312,16 @@ def ejecutar_sp(nombre: str, param: str, valor: str | None, timeout: int, on_spi
 
 # ---------- Equipos sin agencia (toda la tabla de asignación) ----------
 
+def _aplica(alias: str = "") -> str:
+    """Filtro de los equipos que aplican en la staging ("" si no está configurado). El valor viene de .env y ya se
+    validó con regex (sin comillas)."""
+    if not settings.ASIGNACION_COLUMNA_APLICA:
+        return ""
+    return f" AND {alias}{settings.ASIGNACION_COLUMNA_APLICA} = N'{settings.ASIGNACION_VALOR_APLICA}'"
+
+
 def _sin_agencia() -> str:
-    return f"{settings.ASIGNACION_COLUMNA_AGENCIA} IS NULL"
+    return f"{settings.ASIGNACION_COLUMNA_AGENCIA} IS NULL{_aplica()}"
 
 
 def sin_asignar_contar() -> int:
@@ -360,7 +368,7 @@ def asignar_agencia(ids: list[str], agencia: str, periodo: str, usuario: str) ->
             cur.execute(
                 f"SELECT {col_id} AS id, {col_ag} AS agencia FROM {settings.ASIGNACION_TABLA} WITH (UPDLOCK) "
                 f"WHERE {col_id} IN ({marcas}) AND ({col_ag} IS NULL OR ({col_ag} <> ? AND {col_id} IN "
-                f"(SELECT EquipoId FROM dbo.AppAsignacionesManuales WHERE Periodo = ?)))",
+                f"(SELECT EquipoId FROM dbo.AppAsignacionesManuales WHERE Periodo = ?))){_aplica()}",
                 *bloque, agencia, periodo,
             )
             cambios = [(str(f.id).strip(), None if f.agencia is None else str(f.agencia).strip()) for f in cur.fetchall()]
@@ -431,7 +439,7 @@ def asignaciones_reaplicar(periodo: str) -> tuple[int, int]:
         cur.execute(
             ultimas + f"UPDATE a SET a.{settings.ASIGNACION_COLUMNA_AGENCIA} = u.AgenciaNueva "
             f"FROM {settings.ASIGNACION_TABLA} a JOIN ult u ON a.{settings.ASIGNACION_COLUMNA_ID} = u.EquipoId AND u.rn = 1 "
-            f"WHERE a.{settings.ASIGNACION_COLUMNA_AGENCIA} IS NULL", periodo,
+            f"WHERE a.{settings.ASIGNACION_COLUMNA_AGENCIA} IS NULL{_aplica('a.')}", periodo,
         )
         reaplicadas = cur.rowcount
         total = cur.execute(
@@ -441,10 +449,14 @@ def asignaciones_reaplicar(periodo: str) -> tuple[int, int]:
 
 
 def asignacion_exportar(on_columnas, on_filas) -> int:
-    """Recorre toda la tabla de asignación en bloques: on_columnas(nombres) y luego on_filas(lista) por bloque."""
+    """Recorre la tabla final (o, sin ella, toda la de asignación) en bloques: on_columnas(nombres) y luego
+    on_filas(lista) por bloque."""
     total = 0
+    sql, params = f"SELECT * FROM {settings.ASIGNACION_RETIRO_TABLA or settings.ASIGNACION_TABLA}", []
+    if settings.ASIGNACION_RETIRO_TABLA and settings.ASIGNACION_RETIRO_COLUMNA_PERIODO:
+        sql, params = f"{sql} WHERE {settings.ASIGNACION_RETIRO_COLUMNA_PERIODO} = ?", [periodo_actual()]
     with get_connection() as conn:
-        cur = conn.cursor().execute(f"SELECT * FROM {settings.ASIGNACION_TABLA}")
+        cur = conn.cursor().execute(sql, *params)
         on_columnas([c[0] for c in cur.description])
         while filas := cur.fetchmany(5000):
             on_filas(filas)

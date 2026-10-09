@@ -50,8 +50,9 @@ Mora  ┘                         Bajas y Mora OK)
    varios a la vez, eligiendo del catálogo de agencias (tabla SQL, siempre las vigentes). Revisa **toda** la tabla
    de asignación (lo nuevo y lo pendiente de periodos anteriores). La vista *Asignados a mano* permite corregir una
    asignación; se conservan al regenerar.
-5. **Paso 4 — Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo y
-   entonces **Exportar a Excel** toda la tabla de asignación.
+5. **Paso 4 — Completar asignación**: cuando no queda ningún equipo sin agencia se puede completar (cerrar) el periodo:
+   el SP de completar (`SP_COMPLETAR`) pasa los equipos que aplican de la staging a la tabla final y entonces se puede
+   **Exportar a Excel** esa tabla.
 6. Todo queda en la **bitácora del periodo** y en el historial del Dashboard.
 
 ### Reglas de negocio
@@ -90,8 +91,13 @@ Mora  ┘                         Bajas y Mora OK)
   en curso (se revalida en el servidor → `422` con motivos). Con el periodo completado se bloquean la asignación
   manual y *Regenerar* (`409`); se puede **Reabrir** con confirmación. La exportación solo funciona con el periodo
   completado.
-- **Excel**: una hoja con `SELECT *` de la tabla de asignación completa (ya viene trabajada por el SP: lo nuevo + los
-  pendientes de periodos anteriores), columnas tal cual. Cada exportación queda en bitácora.
+- **Staging y tabla final**: `SP_ASIGNACION` deja en la staging (`ASIGNACION_TABLA`) lo que aplica y lo que no; el
+  paso 3 solo trabaja con lo que aplica (`ASIGNACION_COLUMNA_APLICA` = `ASIGNACION_VALOR_APLICA`). Al completar,
+  `SP_COMPLETAR` borra lo del periodo en la tabla final y vuelve a insertar, así que reabrir y completar de nuevo no
+  duplica.
+- **Excel**: una hoja con `SELECT *` de la tabla final (`ASIGNACION_RETIRO_TABLA`, filtrada por el periodo de la
+  asignación si se configura `ASIGNACION_RETIRO_COLUMNA_PERIODO`; sin ella, la staging completa), columnas tal cual.
+  Cada exportación queda en bitácora.
 - **Programaciones vencidas**: si no pudieron ejecutarse dentro de `PROGRAMACION_TOLERANCIA_MIN` (120 min por
   defecto) — servidor apagado u otro proceso en curso — se registran como no ejecutadas.
 
@@ -112,6 +118,8 @@ Mora  ┘                         Bajas y Mora OK)
    - **Mora**: `SP_MORA` y `MORA_TABLA`
    - **Asignación**: `SP_ASIGNACION`; y para el paso 3, la tabla que llena (`ASIGNACION_TABLA`), su columna
      identificadora, la de agencia y las columnas a mostrar (se usa la tabla completa, también para el Excel)
+   - **Staging y completar**: columna/valor de los equipos que aplican, `SP_COMPLETAR` y la tabla final de la que
+     sale el Excel (`ASIGNACION_RETIRO_TABLA`)
    - **Agencias**: `AGENCIAS_TABLA` (puede ser una vista que filtre las activas), columna del valor que se escribe y
      columna del nombre visible
    - **Programación**: `APP_TIMEZONE` y `PROGRAMACION_TOLERANCIA_MIN`
@@ -125,6 +133,11 @@ Mora  ┘                         Bajas y Mora OK)
    - `backend/sql/002_control.sql` (procesos, validaciones, bitácora y programaciones)
    - `backend/sql/003_cierre.sql` (periodos completados)
    - `backend/sql/004_asignaciones_manuales.sql` (historial de agencias asignadas a mano)
+
+   Los SPs de extracción y mora (que envuelven las consultas por linked server) están en `backend/sql/local/`, fuera
+   de git porque llevan nombres reales: primero `196_sps.sql` en la 196 y luego `destino_sps.sql` en el destino (que
+   además configura el linked server: `rpc out`, `remote proc transaction promotion = false` para no exigir MSDTC y
+   `query timeout` mayor a los ~40 min de la mora).
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
    mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación

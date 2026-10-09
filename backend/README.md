@@ -31,7 +31,8 @@ backend/
 │   ├── 001_tablas_app.sql   # AppUsuarios
 │   ├── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
 │   ├── 003_cierre.sql       # AppCierres
-│   └── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
+│   ├── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
+│   └── local/               # (fuera de git) SPs de extracción y mora: 196_sps.sql y destino_sps.sql
 ├── .env.example             # Plantilla documentada de configuración
 ├── .env.demo                # Configuración ficticia del modo demo (sí se versiona)
 └── requirements.txt
@@ -148,8 +149,11 @@ Una programación por tipo (`MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC` e `INS
 
 `SP_ASIGNACION` deja `NULL` la agencia cuando los datos del equipo no cuadran. Funciones en `repo.py`:
 
-- `sin_asignar_contar` / `sin_asignar_listar`: `WHERE {ASIGNACION_COLUMNA_AGENCIA} IS NULL` sobre **toda** la tabla
-  (es lo mismo que se exporta). Columnas visibles de `ASIGNACION_COLUMNAS_VISIBLES`.
+- `ASIGNACION_TABLA` es la **staging** (aplica y no aplica). `_aplica()` añade `AND {ASIGNACION_COLUMNA_APLICA} =
+  N'{ASIGNACION_VALOR_APLICA}'` (vacío = sin filtro; el valor se valida con regex al arrancar) a `_sin_agencia()`,
+  `asignar_agencia` y `asignaciones_reaplicar`.
+- `sin_asignar_contar` / `sin_asignar_listar`: `WHERE {ASIGNACION_COLUMNA_AGENCIA} IS NULL` (+ `_aplica()`) sobre
+  toda la staging. Columnas visibles de `ASIGNACION_COLUMNAS_VISIBLES`.
 - `agencias_listar`: `AGENCIAS_COLUMNA_VALOR` / `AGENCIAS_COLUMNA_NOMBRE` de `AGENCIAS_TABLA`.
 - `asignar_agencia(ids, agencia, periodo, usuario)`: en bloques de 500 ids (límite de ~2100 parámetros de SQL
   Server), una transacción. Primero lee (`UPDLOCK`) los equipos que **siguen con agencia `NULL` o ya se asignaron a
@@ -190,10 +194,14 @@ asignación OK y sin cierre (caso de extracciones sueltas o de un flujo que no l
 ## Completar y exportar (paso 4)
 
 - `AppCierres` (una fila por periodo completado). `POST /completar` revalida con `_motivos_completar` (asignación OK,
-  `sin_asignar_contar() == 0`, sin proceso en curso) → `422 {mensaje, motivos}`; `POST /reabrir` borra la fila.
+  `sin_asignar_contar() == 0`, sin proceso en curso) → `422 {mensaje, motivos}`. Luego, con el lock tomado
+  (`procesos.exclusivo()`, 409 si hay algo en curso), ejecuta `SP_COMPLETAR` (si está configurado; recibe el periodo
+  de la asignación por `SP_COMPLETAR_PARAM_PERIODO`) y crea el cierre. Si el SP falla: bitácora `error` y
+  `500 {mensaje, motivos}`, sin cierre. `POST /reabrir` borra la fila (el SP de completar es idempotente).
 - Con cierre: `POST /sin-asignar` y `POST /asignacion` → `409`.
 - `exportar.py`: `openpyxl` en modo `write_only` (memoria constante). `repo.asignacion_exportar` hace
-  `SELECT * FROM {ASIGNACION_TABLA}` y entrega filas en bloques de 5000. Encabezado en negrita, fila 1 congelada y
+  `SELECT * FROM {ASIGNACION_RETIRO_TABLA}` (con `WHERE {ASIGNACION_RETIRO_COLUMNA_PERIODO} = periodo` si está; sin
+  tabla final, la staging completa) y entrega filas en bloques de 5000. Encabezado en negrita, fila 1 congelada y
   autofiltro. Se escribe a un temporal que se borra tras enviarlo (`FileResponse` + `BackgroundTask`).
 
 ## API

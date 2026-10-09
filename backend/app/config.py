@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     ASIGNACION_COLUMNAS_VISIBLES: str  # separadas por comas
     # Subconjunto de las visibles que el usuario puede corregir en el paso 3 (vacío = ninguna)
     ASIGNACION_COLUMNAS_EDITABLES: str = ""
+    # Filtro de los equipos que aplican dentro de la staging (vacío = toda la tabla)
+    ASIGNACION_COLUMNA_APLICA: str = ""
+    ASIGNACION_VALOR_APLICA: str = ""
+    # Tabla final que llena el SP de completar; de ella sale el Excel (vacío = se exporta ASIGNACION_TABLA)
+    ASIGNACION_RETIRO_TABLA: str = ""
+    ASIGNACION_RETIRO_COLUMNA_PERIODO: str = ""  # vacío = se exporta la tabla completa
+
+    # Completar (paso 4): SP que pasa a la tabla final los equipos que aplican (vacío = solo se cierra en la app)
+    SP_COMPLETAR: str = ""
+    SP_COMPLETAR_PARAM_PERIODO: str = ""
+    COMPLETAR_TIMEOUT_SECONDS: int = 0
 
     # Catálogo de agencias
     AGENCIAS_TABLA: str
@@ -85,6 +96,27 @@ class Settings(BaseSettings):
             raise ValueError(f"{info.field_name} no es un nombre SQL válido")
         return v
 
+    @field_validator("SP_COMPLETAR", "ASIGNACION_RETIRO_TABLA")
+    @classmethod
+    def validar_objeto_opcional(cls, v: str, info) -> str:
+        if v and not re.fullmatch(_OBJETO_SQL, v):
+            raise ValueError(f"{info.field_name} no es un nombre SQL válido")
+        return v
+
+    @field_validator("ASIGNACION_COLUMNA_APLICA", "ASIGNACION_RETIRO_COLUMNA_PERIODO")
+    @classmethod
+    def validar_columna_opcional(cls, v: str, info) -> str:
+        if v and not re.fullmatch(_COLUMNA_SQL, v):
+            raise ValueError(f"{info.field_name} no es un nombre de columna válido")
+        return v
+
+    @field_validator("ASIGNACION_VALOR_APLICA")
+    @classmethod
+    def validar_valor_aplica(cls, v: str, info) -> str:
+        if not re.fullmatch(r"[\w .-]*", v):
+            raise ValueError(f"{info.field_name} solo admite letras, números, espacios, punto y guion")
+        return v
+
     @field_validator("BAJAS_COLUMNA_PERIODO", "CAMBIO_TEC_COLUMNA_PERIODO", "ASIGNACION_COLUMNA_ID",
                      "ASIGNACION_COLUMNA_AGENCIA", "AGENCIAS_COLUMNA_VALOR", "AGENCIAS_COLUMNA_NOMBRE")
     @classmethod
@@ -110,9 +142,11 @@ class Settings(BaseSettings):
             raise ValueError("ASIGNACION_COLUMNAS_EDITABLES debe ser un subconjunto de ASIGNACION_COLUMNAS_VISIBLES "
                              "sin la columna identificadora ni la de agencia")
         self.ASIGNACION_COLUMNAS_EDITABLES = ",".join(editables)
+        if bool(self.ASIGNACION_COLUMNA_APLICA) != bool(self.ASIGNACION_VALOR_APLICA):
+            raise ValueError("ASIGNACION_COLUMNA_APLICA y ASIGNACION_VALOR_APLICA van juntas (las dos o ninguna)")
         return self
 
-    @field_validator("SP_EXTRAER_BAJAS_PARAM_PERIODO", "SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO")
+    @field_validator("SP_EXTRAER_BAJAS_PARAM_PERIODO", "SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO", "SP_COMPLETAR_PARAM_PERIODO")
     @classmethod
     def validar_param(cls, v: str, info) -> str:
         if not re.fullmatch(_PARAM_SQL, v):

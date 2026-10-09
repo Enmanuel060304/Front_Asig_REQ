@@ -8,6 +8,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from . import insumos, repo
@@ -68,6 +69,20 @@ def secuencia_estado() -> dict | None:
 def ocupado() -> bool:
     """Hay un proceso o una secuencia en curso (la secuencia retiene el lock también entre pasos)."""
     return _lock.locked() or bool(repo.proceso_en_curso())
+
+
+@contextmanager
+def exclusivo():
+    """Retiene el lock mientras corre una operación corta y síncrona (p. ej. el SP de completar), para que nadie
+    lance un proceso que toque las mismas tablas. Lanza ProcesoEnCurso si ya hay algo en curso."""
+    if not _lock.acquire(blocking=False):
+        raise ProcesoEnCurso()
+    try:
+        if repo.proceso_en_curso():
+            raise ProcesoEnCurso()
+        yield
+    finally:
+        _lock.release()
 
 
 def iniciar(tipo: str, usuario: str, origen: str = "MANUAL") -> int:

@@ -305,9 +305,29 @@ def _completar(usuario: str) -> dict:
                                  procesos.ocupado())
     if motivos:
         raise HTTPException(422, {"mensaje": "No se puede completar la asignación", "motivos": motivos})
-    repo.cierre_crear(periodo, usuario)
+    try:
+        with procesos.exclusivo():
+            if settings.SP_COMPLETAR:
+                _ejecutar_sp_completar(periodo, usuario)
+            repo.cierre_crear(periodo, usuario)
+    except procesos.ProcesoEnCurso:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un proceso en curso; espera a que termine")
     repo.bitacora_add(periodo, usuario, "ok", "Completó la asignación del periodo")
     return repo.cierre_get(periodo)
+
+
+def _ejecutar_sp_completar(periodo: str, usuario: str) -> None:
+    """Pasa a la tabla final los equipos que aplican. El SP borra antes lo del periodo, así que se puede repetir."""
+    try:
+        filas = repo.ejecutar_sp(settings.SP_COMPLETAR, settings.SP_COMPLETAR_PARAM_PERIODO, periodo,
+                                 settings.COMPLETAR_TIMEOUT_SECONDS, lambda _spid: None)
+    except Exception as e:
+        logger.exception("Error en el SP de completar")
+        repo.bitacora_add(periodo, usuario, "error", f"Falló el SP de completar: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            {"mensaje": "No se pudo completar la asignación", "motivos": [str(e)]})
+    detalle = "" if filas is None else f" ({filas:,} filas)".replace(",", ".")
+    repo.bitacora_add(periodo, usuario, "info", f"Equipos pasados a la tabla final{detalle}")
 
 
 @router.post("/completar", dependencies=csrf)
