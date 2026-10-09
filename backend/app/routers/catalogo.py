@@ -59,7 +59,7 @@ async def agencias():
     return await run_in_threadpool(repo.catalogo_agencias)
 
 
-@router.put("/agencias/{nombre}", dependencies=csrf)
+@router.put("/agencias/{nombre:path}", dependencies=csrf)
 async def renombrar_agencia(nombre: str, data: AgenciaIn, usuario: str = Depends(get_current_user)):
     def txt(r):
         return f"renombró la agencia «{nombre}» a «{data.agencia}» ({r[0]} distrito(s), {r[1]} municipio(s))"
@@ -67,7 +67,7 @@ async def renombrar_agencia(nombre: str, data: AgenciaIn, usuario: str = Depends
     return {"distritos": d, "municipios": m}
 
 
-@router.delete("/agencias/{nombre}", dependencies=csrf)
+@router.delete("/agencias/{nombre:path}", dependencies=csrf)
 async def eliminar_agencia(nombre: str, usuario: str = Depends(get_current_user)):
     def txt(r):
         return f"eliminó la agencia «{nombre}» con sus {r[0]} distrito(s) y {r[1]} municipio(s)"
@@ -89,7 +89,7 @@ async def crear_distrito(data: DistritoIn, usuario: str = Depends(get_current_us
         lambda r: f"agregó el distrito «{r['distrito']}» → {r['agencia']}", data.distrito, data.agencia, usuario)
 
 
-@router.put("/distritos/{distrito}", dependencies=csrf)
+@router.put("/distritos/{distrito:path}", dependencies=csrf)
 async def actualizar_distrito(distrito: str, data: DistritoIn, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_distrito_actualizar,
@@ -97,7 +97,7 @@ async def actualizar_distrito(distrito: str, data: DistritoIn, usuario: str = De
         distrito, data.distrito, data.agencia, usuario)
 
 
-@router.delete("/distritos/{distrito}", dependencies=csrf)
+@router.delete("/distritos/{distrito:path}", dependencies=csrf)
 async def eliminar_distrito(distrito: str, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_distrito_eliminar,
