@@ -33,7 +33,9 @@ Contexto del negocio y reglas: ver el [README raíz](../README.md). API: ver [ba
      extrajeron por separado muestra *Lista para generar* y el botón *Generar asignación*. *Regenerar* avisa que las
      agencias asignadas a mano se reaplican a los equipos que sigan sin agencia.
   3. **Equipos sin asignar** (`paso-sin-asignar.tsx`): dos vistas. *Sin agencia*: tabla de equipos con agencia NULL,
-     buscador, combobox de agencia por fila y barra de lote al marcar varios. *Asignados a mano*: los equipos del
+     buscador, combobox de agencia por fila y barra de lote al marcar varios; al abrir un equipo, un modal
+     (`EditarEquipoDialog`) muestra sus datos, permite corregir las columnas `editables` y elegir la agencia con un
+     solo *Guardar* (`api.editarEquipo` + `api.asignarAgencia`). *Asignados a mano*: los equipos del
      periodo asignados a mano, con la agencia actual, para **corregirlos** (*Cambiar*). Pendiente hasta que haya
      asignación; *Advertencia* "N sin agencia" o *OK*. Cuenta como hecho con 0 pendientes. Dibuja máx. 100 filas (el
      resto, con el buscador). Con el periodo completado queda en solo lectura.

@@ -202,7 +202,11 @@ def _sin_asignar() -> dict:
     columnas, filas = repo.sin_asignar_listar(LIMITE_SIN_ASIGNAR)
     for f in filas:
         f["_id"] = str(f["_id"]).strip()
-    return {"columnas": columnas, "filas": filas, "total": repo.sin_asignar_contar()}
+    return {"columnas": columnas, "filas": filas, "total": repo.sin_asignar_contar(), "editables": _editables()}
+
+
+def _editables() -> list[str]:
+    return [c.strip("[]") for c in settings.ASIGNACION_COLUMNAS_EDITABLES.split(",") if c]
 
 
 @router.get("/sin-asignar")
@@ -260,6 +264,37 @@ async def asignar_agencia(data: AsignarAgenciaIn, usuario: str = Depends(get_cur
     return await run_in_threadpool(_asignar_agencia, data, usuario)
 
 
+class EditarEquipoIn(BaseModel):
+    valores: dict[str, str | None] = Field(min_length=1)
+
+
+def _editar_equipo(id_: str, data: EditarEquipoIn, usuario: str) -> dict:
+    periodo = periodo_actual()
+    if repo.cierre_get(periodo):
+        raise HTTPException(status.HTTP_409_CONFLICT, MSG_CERRADA)
+    if procesos.ocupado():
+        raise HTTPException(status.HTTP_409_CONFLICT, "Hay un proceso en curso; espera a que termine")
+    no_editables = set(data.valores) - set(_editables())
+    if no_editables:
+        raise HTTPException(422, f"Columnas no editables: {', '.join(sorted(no_editables))}")
+    valores = {k: (v.strip() or None) if v is not None else None for k, v in data.valores.items()}
+    if any(v is not None and len(v) > 200 for v in valores.values()):
+        raise HTTPException(422, "Los valores no pueden superar 200 caracteres")
+
+    antes = repo.equipo_editar(id_, valores)
+    if antes is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "El equipo no existe o ya tiene agencia")
+    cambios = [f"{k}: {antes[k] or '—'} → {v or '—'}" for k, v in valores.items() if (antes[k] or None) != v]
+    if cambios:
+        repo.bitacora_add(periodo, usuario, "info", f"Corrigió el equipo {id_}: " + "; ".join(cambios))
+    return {"actualizados": len(cambios)}
+
+
+@router.patch("/sin-asignar/{id_}", dependencies=csrf)
+async def editar_equipo(id_: str, data: EditarEquipoIn, usuario: str = Depends(get_current_user)):
+    return await run_in_threadpool(_editar_equipo, id_, data, usuario)
+
+
 # ---------- Completar (cierre del periodo) y exportar ----------
 
 def _completar(usuario: str) -> dict:
@@ -271,9 +306,29 @@ def _completar(usuario: str) -> dict:
                                  procesos.ocupado())
     if motivos:
         raise HTTPException(422, {"mensaje": "No se puede completar la asignación", "motivos": motivos})
-    repo.cierre_crear(periodo, usuario)
+    try:
+        with procesos.exclusivo():
+            if settings.SP_COMPLETAR:
+                _ejecutar_sp_completar(periodo, usuario)
+            repo.cierre_crear(periodo, usuario)
+    except procesos.ProcesoEnCurso:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un proceso en curso; espera a que termine")
     repo.bitacora_add(periodo, usuario, "ok", "Completó la asignación del periodo")
     return repo.cierre_get(periodo)
+
+
+def _ejecutar_sp_completar(periodo: str, usuario: str) -> None:
+    """Pasa a la tabla final los equipos que aplican. El SP borra antes lo del periodo, así que se puede repetir."""
+    try:
+        filas = repo.ejecutar_sp(settings.SP_COMPLETAR, settings.SP_COMPLETAR_PARAM_PERIODO, periodo,
+                                 settings.COMPLETAR_TIMEOUT_SECONDS, lambda _spid: None)
+    except Exception as e:
+        logger.exception("Error en el SP de completar")
+        repo.bitacora_add(periodo, usuario, "error", f"Falló el SP de completar: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            {"mensaje": "No se pudo completar la asignación", "motivos": [str(e)]})
+    detalle = "" if filas is None else f" ({filas:,} filas)".replace(",", ".")
+    repo.bitacora_add(periodo, usuario, "info", f"Equipos pasados a la tabla final{detalle}")
 
 
 @router.post("/completar", dependencies=csrf)

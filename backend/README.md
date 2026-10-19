@@ -36,7 +36,8 @@ backend/
 │   ├── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
 │   ├── 005_catalogo_datos_demo.sql    # SOLO pruebas: datos ficticios en Cat.* (se detiene si la base no es la de pruebas)
 │   ├── 006_catalogo_vista_agencias.sql # Cat.vw_Agencias (también producción)
-│   └── 007_catalogo_auditoria.sql     # AppCatalogoAuditoria (también producción)
+│   ├── 007_catalogo_auditoria.sql     # AppCatalogoAuditoria (también producción)
+│   └── local/               # (fuera de git) SPs de extracción y mora: 196_sps.sql y destino_sps.sql
 ├── .env.example             # Plantilla documentada de configuración
 ├── .env.production.example  # Plantilla de producción (el .env.production real no se versiona)
 ├── .env.demo                # Configuración ficticia del modo demo (sí se versiona)
@@ -178,8 +179,11 @@ Una programación por tipo (`MORA`, `EXTRAER_BAJAS`, `EXTRAER_CAMBIO_TEC` e `INS
 
 `SP_ASIGNACION` deja `NULL` la agencia cuando los datos del equipo no cuadran. Funciones en `repo.py`:
 
-- `sin_asignar_contar` / `sin_asignar_listar`: `WHERE {ASIGNACION_COLUMNA_AGENCIA} IS NULL` sobre **toda** la tabla
-  (es lo mismo que se exporta). Columnas visibles de `ASIGNACION_COLUMNAS_VISIBLES`.
+- `ASIGNACION_TABLA` es la **staging** (aplica y no aplica). `_aplica()` añade `AND {ASIGNACION_COLUMNA_APLICA} =
+  N'{ASIGNACION_VALOR_APLICA}'` (vacío = sin filtro; el valor se valida con regex al arrancar) a `_sin_agencia()`,
+  `asignar_agencia` y `asignaciones_reaplicar`.
+- `sin_asignar_contar` / `sin_asignar_listar`: `WHERE {ASIGNACION_COLUMNA_AGENCIA} IS NULL` (+ `_aplica()`) sobre
+  toda la staging. Columnas visibles de `ASIGNACION_COLUMNAS_VISIBLES`.
 - `agencias_listar`: `AGENCIAS_COLUMNA_VALOR` / `AGENCIAS_COLUMNA_NOMBRE` de `AGENCIAS_TABLA`.
 - `asignar_agencia(ids, agencia, periodo, usuario)`: en bloques de 500 ids (límite de ~2100 parámetros de SQL
   Server), una transacción. Primero lee (`UPDLOCK`) los equipos que **siguen con agencia `NULL` o ya se asignaron a
@@ -220,10 +224,14 @@ asignación OK y sin cierre (caso de extracciones sueltas o de un flujo que no l
 ## Completar y exportar (paso 4)
 
 - `AppCierres` (una fila por periodo completado). `POST /completar` revalida con `_motivos_completar` (asignación OK,
-  `sin_asignar_contar() == 0`, sin proceso en curso) → `422 {mensaje, motivos}`; `POST /reabrir` borra la fila.
+  `sin_asignar_contar() == 0`, sin proceso en curso) → `422 {mensaje, motivos}`. Luego, con el lock tomado
+  (`procesos.exclusivo()`, 409 si hay algo en curso), ejecuta `SP_COMPLETAR` (si está configurado; recibe el periodo
+  de la asignación por `SP_COMPLETAR_PARAM_PERIODO`) y crea el cierre. Si el SP falla: bitácora `error` y
+  `500 {mensaje, motivos}`, sin cierre. `POST /reabrir` borra la fila (el SP de completar es idempotente).
 - Con cierre: `POST /sin-asignar` y `POST /asignacion` → `409`.
 - `exportar.py`: `openpyxl` en modo `write_only` (memoria constante). `repo.asignacion_exportar` hace
-  `SELECT * FROM {ASIGNACION_TABLA}` y entrega filas en bloques de 5000. Encabezado en negrita, fila 1 congelada y
+  `SELECT * FROM {ASIGNACION_RETIRO_TABLA}` (con `WHERE {ASIGNACION_RETIRO_COLUMNA_PERIODO} = periodo` si está; sin
+  tabla final, la staging completa) y entrega filas en bloques de 5000. Encabezado en negrita, fila 1 congelada y
   autofiltro. Se escribe a un temporal que se borra tras enviarlo (`FileResponse` + `BackgroundTask`).
 
 ## API
@@ -251,10 +259,11 @@ Todas las rutas de `/api/control` requieren la cookie de sesión. Las de escritu
 | POST | `/api/control/completar` | Cierra el periodo (409 si ya está, 422 con `{mensaje, motivos}`) |
 | POST | `/api/control/reabrir` | Reabre el periodo |
 | GET | `/api/control/exportar` | Descarga `Asignacion_YYYYMM.xlsx` (409 si el periodo no está completado) |
-| GET | `/api/control/sin-asignar` | Equipos con agencia NULL: `{columnas, filas (con _id), total}` (máx. 5000 filas) |
+| GET | `/api/control/sin-asignar` | Equipos con agencia NULL: `{columnas, filas (con _id), total, editables}` (máx. 5000 filas) |
 | GET | `/api/control/asignados-manual` | Equipos asignados a mano en el periodo: `{columnas, filas (con _id y _agencia), total}` |
 | GET | `/api/control/agencias` | Catálogo `[{valor, nombre}]` |
 | POST | `/api/control/sin-asignar` | `{ids, agencia}` → `{actualizados}`: asigna o corrige (409 si hay proceso o periodo completado, 422 si la agencia no existe) |
+| PATCH | `/api/control/sin-asignar/{id}` | `{valores: {columna: valor}}` → `{actualizados}`: corrige columnas de `ASIGNACION_COLUMNAS_EDITABLES` de un equipo sin agencia; queda en bitácora (409 si hay proceso o periodo completado, 404 si no existe o ya tiene agencia, 422 si la columna no es editable) |
 | POST | `/api/demo/siguiente-periodo` | **Solo demo**: pasa al mes siguiente → `{periodo}` (409 si hay proceso en curso) |
 
 Documentación interactiva en `http://localhost:8000/docs`.
