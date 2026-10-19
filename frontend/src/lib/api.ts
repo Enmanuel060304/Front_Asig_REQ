@@ -249,16 +249,14 @@ export const api = {
     request<{ ok: boolean }>("DELETE", `/api/control/programaciones/${tipo}`),
 
   catalogoAgencias: () => request<AgenciaCatalogo[]>("GET", cat("agencias")),
+  crearAgencia: (a: { agencia: string; distritos: number[]; municipios: number[] }) =>
+    request<{ distritos: number; municipios: number }>("POST", cat("agencias"), a),
   renombrarAgencia: (actual: string, agencia: string) =>
     request<{ distritos: number; municipios: number }>("PUT", cat(`agencias/${enc(actual)}`), { agencia }),
   eliminarAgencia: (agencia: string) =>
     request<{ distritos: number; municipios: number }>("DELETE", cat(`agencias/${enc(agencia)}`)),
   distritos: () => request<Distrito[]>("GET", cat("distritos")),
-  crearDistrito: (d: Distrito) => request<Distrito>("POST", cat("distritos"), d),
   actualizarDistrito: (actual: number, d: Distrito) => request<Distrito>("PUT", cat(`distritos/${enc(actual)}`), d),
-  eliminarDistrito: (distrito: number) => request<Distrito>("DELETE", cat(`distritos/${enc(distrito)}`)),
   municipios: () => request<Municipio[]>("GET", cat("municipios")),
-  crearMunicipio: (m: Omit<Municipio, "id">) => request<Municipio>("POST", cat("municipios"), m),
   actualizarMunicipio: (id: number, m: Omit<Municipio, "id">) => request<Municipio>("PUT", cat(`municipios/${id}`), m),
-  eliminarMunicipio: (id: number) => request<Municipio>("DELETE", cat(`municipios/${id}`)),
 }

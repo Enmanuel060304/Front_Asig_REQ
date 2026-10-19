@@ -112,6 +112,105 @@ function DialogoFormulario({
   )
 }
 
+/** Una agencia solo existe si cubre zonas: se crea eligiendo los distritos y municipios que pasan a ella. */
+function DialogoNuevaAgencia({
+  abierto,
+  distritos,
+  municipios,
+  nombresAgencias,
+  onCerrar,
+  guardar,
+}: {
+  abierto: boolean
+  distritos: Distrito[]
+  municipios: Municipio[]
+  nombresAgencias: string[]
+  onCerrar: () => void
+  guardar: (a: { agencia: string; distritos: number[]; municipios: number[] }) => Promise<unknown>
+}) {
+  const [nombre, setNombre] = React.useState("")
+  const [selD, setSelD] = React.useState<Set<number>>(new Set())
+  const [selM, setSelM] = React.useState<Set<number>>(new Set())
+  const [enviando, setEnviando] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!abierto) return
+    setNombre("")
+    setSelD(new Set())
+    setSelM(new Set())
+  }, [abierto])
+
+  const limpio = nombre.trim()
+  const repetida = nombresAgencias.some((a) => a.toLowerCase() === limpio.toLowerCase())
+  const valido = limpio !== "" && !repetida && selD.size + selM.size > 0
+
+  const alternar = (set: Set<number>, setSet: (s: Set<number>) => void, id: number) => {
+    const n = new Set(set)
+    if (!n.delete(id)) n.add(id)
+    setSet(n)
+  }
+
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!valido) return
+    setEnviando(true)
+    try {
+      await guardar({ agencia: limpio, distritos: [...selD], municipios: [...selM] })
+      onCerrar()
+    } catch {
+      // ya se avisó con un toast
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const lista = (titulo: string, items: { id: number; texto: string; agencia: string }[], sel: Set<number>, setSel: (s: Set<number>) => void) => (
+    <div className="flex flex-col gap-1">
+      <Label>{titulo} ({sel.size} elegidos)</Label>
+      <div className="max-h-40 overflow-y-auto rounded-md border p-2">
+        {items.map((i) => (
+          <label key={i.id} className="flex cursor-pointer items-center gap-2 py-0.5 text-sm">
+            <input type="checkbox" checked={sel.has(i.id)} onChange={() => alternar(sel, setSel, i.id)} />
+            <span>{i.texto}</span>
+            <span className="text-muted-foreground">· hoy: {i.agencia}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
+    <Dialog open={abierto} onOpenChange={(v) => !v && onCerrar()}>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={enviar} className="flex flex-col gap-4">
+          <DialogHeader>
+            <DialogTitle>Nueva agencia</DialogTitle>
+            <DialogDescription>
+              Elige qué distritos y municipios pasan a la nueva agencia (dejan de pertenecer a la que tenían).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="nueva-agencia">Nombre de la agencia</Label>
+            <Input id="nueva-agencia" value={nombre} maxLength={100} onChange={(e) => setNombre(e.target.value)} autoFocus />
+            {repetida && <p className="text-sm text-destructive">Ya existe una agencia con ese nombre.</p>}
+          </div>
+          {lista("Distritos", distritos.map((d) => ({ id: d.distrito, texto: `Distrito ${d.distrito}`, agencia: d.agencia })), selD, setSelD)}
+          {lista("Municipios", municipios.map((m) => ({ id: m.id, texto: m.municipio, agencia: m.agencia })), selM, setSelM)}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCerrar}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={!valido || enviando}>
+              {enviando && <Loader2Icon className="animate-spin" />}
+              Crear
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function Acciones({ onEditar, onEliminar, descripcion }: { onEditar: () => void; onEliminar: () => Promise<unknown>; descripcion: string }) {
   return (
     <div className="flex justify-end gap-1">
@@ -169,6 +268,7 @@ export function Catalogo() {
   const [cargando, setCargando] = React.useState(true)
   const [buscar, setBuscar] = React.useState("")
   const [form, setForm] = React.useState<Formulario | null>(null)
+  const [nueva, setNueva] = React.useState(false)
 
   const cargar = React.useCallback(async () => {
     try {
@@ -206,32 +306,32 @@ export function Catalogo() {
   const q = buscar.trim().toLowerCase()
   const coincide = (...v: string[]) => !q || v.some((x) => x.toLowerCase().includes(q))
 
-  const abrirDistrito = (d?: Distrito) =>
+  const abrirDistrito = (d: Distrito) =>
     setForm({
-      titulo: d ? "Editar distrito" : "Nuevo distrito",
+      titulo: "Editar distrito",
       etiqueta: "Distrito (código numérico)",
       conAgencia: true,
       numerico: true,
-      nombre: d ? String(d.distrito) : "",
-      agencia: d?.agencia ?? "",
+      nombre: String(d.distrito),
+      agencia: d.agencia,
       guardar: (nombre, agencia) =>
         guardar(
-          () => (d ? api.actualizarDistrito(d.distrito, { distrito: Number(nombre), agencia }) : api.crearDistrito({ distrito: Number(nombre), agencia })),
-          d ? "Distrito actualizado" : "Distrito agregado",
+          () => api.actualizarDistrito(d.distrito, { distrito: Number(nombre), agencia }),
+          "Distrito actualizado",
         ),
     })
 
-  const abrirMunicipio = (m?: Municipio) =>
+  const abrirMunicipio = (m: Municipio) =>
     setForm({
-      titulo: m ? "Editar municipio" : "Nuevo municipio",
+      titulo: "Editar municipio",
       etiqueta: "Municipio",
       conAgencia: true,
-      nombre: m?.municipio ?? "",
-      agencia: m?.agencia ?? "",
+      nombre: m.municipio,
+      agencia: m.agencia,
       guardar: (nombre, agencia) =>
         guardar(
-          () => (m ? api.actualizarMunicipio(m.id, { municipio: nombre, agencia }) : api.crearMunicipio({ municipio: nombre, agencia })),
-          m ? "Municipio actualizado" : "Municipio agregado",
+          () => api.actualizarMunicipio(m.id, { municipio: nombre, agencia }),
+          "Municipio actualizado",
         ),
     })
 
@@ -271,7 +371,12 @@ export function Catalogo() {
           <Input className="max-w-56" placeholder="Buscar…" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
         </div>
 
-        <TabsContent value="agencias" className="pt-3">
+        <TabsContent value="agencias" className="flex flex-col gap-3 pt-3">
+          <div>
+            <Button onClick={() => setNueva(true)}>
+              <PlusIcon /> Nueva agencia
+            </Button>
+          </div>
           <Tabla columnas={["Agencia", "Distritos", "Municipios"]} vacio={agencias.length === 0}>
             {agencias
               .filter((a) => coincide(a.agencia))
@@ -292,12 +397,7 @@ export function Catalogo() {
           </Tabla>
         </TabsContent>
 
-        <TabsContent value="distritos" className="flex flex-col gap-3 pt-3">
-          <div>
-            <Button onClick={() => abrirDistrito()}>
-              <PlusIcon /> Nuevo distrito
-            </Button>
-          </div>
+        <TabsContent value="distritos" className="pt-3">
           <Tabla columnas={["Distrito", "Agencia"]} vacio={distritos.length === 0}>
             {distritos
               .filter((d) => coincide(String(d.distrito), d.agencia))
@@ -306,23 +406,18 @@ export function Catalogo() {
                   <TableCell className="font-medium">{d.distrito}</TableCell>
                   <TableCell>{d.agencia}</TableCell>
                   <TableCell>
-                    <Acciones
-                      onEditar={() => abrirDistrito(d)}
-                      onEliminar={() => eliminar(() => api.eliminarDistrito(d.distrito), "Distrito eliminado")}
-                      descripcion={`Se elimina el distrito ${d.distrito} (agencia ${d.agencia}). Queda en la auditoría.`}
-                    />
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" onClick={() => abrirDistrito(d)}>
+                        <PencilIcon /> Editar
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
           </Tabla>
         </TabsContent>
 
-        <TabsContent value="municipios" className="flex flex-col gap-3 pt-3">
-          <div>
-            <Button onClick={() => abrirMunicipio()}>
-              <PlusIcon /> Nuevo municipio
-            </Button>
-          </div>
+        <TabsContent value="municipios" className="pt-3">
           <Tabla columnas={["Municipio", "Agencia"]} vacio={municipios.length === 0}>
             {municipios
               .filter((m) => coincide(m.municipio, m.agencia))
@@ -331,11 +426,11 @@ export function Catalogo() {
                   <TableCell className="font-medium">{m.municipio}</TableCell>
                   <TableCell>{m.agencia}</TableCell>
                   <TableCell>
-                    <Acciones
-                      onEditar={() => abrirMunicipio(m)}
-                      onEliminar={() => eliminar(() => api.eliminarMunicipio(m.id), "Municipio eliminado")}
-                      descripcion={`Se elimina el municipio «${m.municipio}» (agencia ${m.agencia}). Queda en la auditoría.`}
-                    />
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" onClick={() => abrirMunicipio(m)}>
+                        <PencilIcon /> Editar
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -343,6 +438,14 @@ export function Catalogo() {
         </TabsContent>
       </Tabs>
 
+      <DialogoNuevaAgencia
+        abierto={nueva}
+        distritos={distritos}
+        municipios={municipios}
+        nombresAgencias={nombresAgencias}
+        onCerrar={() => setNueva(false)}
+        guardar={(a) => ejecutar(() => api.crearAgencia(a), "Agencia creada")}
+      />
       <DialogoFormulario form={form} agencias={nombresAgencias} onCerrar={() => setForm(null)} />
     </div>
   )

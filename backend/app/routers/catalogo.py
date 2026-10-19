@@ -1,7 +1,7 @@
 """Mantenimiento del catálogo de agencias: a qué agencia pertenece cada distrito y municipio."""
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import procesos, repo
 from ..catalogo import CatalogoError, ClaveDuplicada, NoEncontrado
@@ -29,6 +29,18 @@ class DistritoIn(_Texto):
 class MunicipioIn(_Texto):
     municipio: str = Texto
     agencia: str = Texto
+
+
+class AgenciaNuevaIn(_Texto):
+    agencia: str = Texto
+    distritos: list[int] = Field(default_factory=list, max_length=1000)
+    municipios: list[int] = Field(default_factory=list, max_length=1000)
+
+    @model_validator(mode="after")
+    def _con_zonas(self):
+        if not self.distritos and not self.municipios:
+            raise ValueError("Una agencia nueva necesita al menos un distrito o municipio")
+        return self
 
 
 class AgenciaIn(_Texto):
@@ -59,6 +71,16 @@ async def agencias():
     return await run_in_threadpool(repo.catalogo_agencias)
 
 
+@router.post("/agencias", status_code=201, dependencies=csrf)
+async def crear_agencia(data: AgenciaNuevaIn, usuario: str = Depends(get_current_user)):
+    def txt(r):
+        return f"creó la agencia «{data.agencia}» con {r[0]} distrito(s) y {r[1]} municipio(s)"
+    d, m = await run_in_threadpool(
+        _escribir, repo.catalogo_agencia_crear, txt, data.agencia, list(dict.fromkeys(data.distritos)),
+        list(dict.fromkeys(data.municipios)), usuario)
+    return {"distritos": d, "municipios": m}
+
+
 @router.put("/agencias/{nombre:path}", dependencies=csrf)
 async def renombrar_agencia(nombre: str, data: AgenciaIn, usuario: str = Depends(get_current_user)):
     def txt(r):
@@ -82,26 +104,12 @@ async def distritos():
     return await run_in_threadpool(repo.catalogo_distritos)
 
 
-@router.post("/distritos", status_code=201, dependencies=csrf)
-async def crear_distrito(data: DistritoIn, usuario: str = Depends(get_current_user)):
-    return await run_in_threadpool(
-        _escribir, repo.catalogo_distrito_crear,
-        lambda r: f"agregó el distrito {r['distrito']} → {r['agencia']}", data.distrito, data.agencia, usuario)
-
-
 @router.put("/distritos/{distrito}", dependencies=csrf)
 async def actualizar_distrito(distrito: int, data: DistritoIn, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_distrito_actualizar,
         lambda r: f"modificó el distrito {distrito} → {r['distrito']} / {r['agencia']}",
         distrito, data.distrito, data.agencia, usuario)
-
-
-@router.delete("/distritos/{distrito}", dependencies=csrf)
-async def eliminar_distrito(distrito: int, usuario: str = Depends(get_current_user)):
-    return await run_in_threadpool(
-        _escribir, repo.catalogo_distrito_eliminar,
-        lambda r: f"eliminó el distrito {r['distrito']} (agencia {r['agencia']})", distrito, usuario)
 
 
 # ---------- Municipios ----------
@@ -111,23 +119,9 @@ async def municipios():
     return await run_in_threadpool(repo.catalogo_municipios)
 
 
-@router.post("/municipios", status_code=201, dependencies=csrf)
-async def crear_municipio(data: MunicipioIn, usuario: str = Depends(get_current_user)):
-    return await run_in_threadpool(
-        _escribir, repo.catalogo_municipio_crear,
-        lambda r: f"agregó el municipio «{r['municipio']}» → {r['agencia']}", data.municipio, data.agencia, usuario)
-
-
 @router.put("/municipios/{id_}", dependencies=csrf)
 async def actualizar_municipio(id_: int, data: MunicipioIn, usuario: str = Depends(get_current_user)):
     return await run_in_threadpool(
         _escribir, repo.catalogo_municipio_actualizar,
         lambda r: f"modificó el municipio {id_} → «{r['municipio']}» / {r['agencia']}",
         id_, data.municipio, data.agencia, usuario)
-
-
-@router.delete("/municipios/{id_}", dependencies=csrf)
-async def eliminar_municipio(id_: int, usuario: str = Depends(get_current_user)):
-    return await run_in_threadpool(
-        _escribir, repo.catalogo_municipio_eliminar,
-        lambda r: f"eliminó el municipio «{r['municipio']}» (agencia {r['agencia']})", id_, usuario)

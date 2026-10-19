@@ -95,7 +95,9 @@ Mora  ┘                         Bajas y Mora OK)
   pendientes de periodos anteriores), columnas tal cual. Cada exportación queda en bitácora.
 - **Catálogo de agencias** (módulo `/catalogo`): una agencia no tiene tabla propia; es la columna `AGENCIA` de los
   mapeos **Distrito → Agencia** (el distrito es un código numérico) (`Cat.Cat_Asig_Distrito`) y **Municipio → Agencia** (`Cat.Cat_Asig_Municipio`). El
-  módulo da de alta, modifica y elimina esas filas (y renombra o elimina una agencia completa). Eliminar es **físico**
+  módulo **no da de alta distritos ni municipios** (son zonas que ya existen): los reasigna de agencia (editar); tampoco los elimina, solo se quitan junto con una agencia. Una **agencia nueva**
+  se crea con *Nueva agencia*: nombre + distritos y municipios existentes que pasan a ella (al menos uno; sin zonas la
+  agencia no existiría). También renombra o elimina una agencia completa. Eliminar es **físico**
   (`DELETE`), con confirmación; cada alta/cambio/baja queda en `AppCatalogoAuditoria` (con el antes y el después) y
   en la bitácora. **No se edita mientras corre un proceso** (`409`): el SP de asignación lee estas tablas. La lista
   de agencias del paso 3 sale de la vista `Cat.vw_Agencias` (las agencias distintas de ambas tablas), así que un
@@ -241,8 +243,8 @@ $env:ENV_FILE=".env.development"; npm run dev:back
 6. Verificar `Cat.vw_Agencias` (`SELECT * FROM Cat.vw_Agencias`) contra las agencias reales.
 7. Instalar ODBC Driver 18; abrir el puerto hacia SQL Server; certificado válido (`DB_TRUST_SERVER_CERTIFICATE=no`) o `DB_CONNECTION_STRING`.
 8. Servicio permanente (NSSM) con `ENV_FILE=.env.production`, **un solo worker**, detrás de HTTPS.
-9. Humo: iniciar sesión; `GET /api/catalogo/agencias` (solo lectura); en una ventana acordada, alta y baja de un
-   distrito de prueba y revisar `AppCatalogoAuditoria`; abrir Control de asignación y comprobar el combobox del paso 3.
+9. Humo: iniciar sesión; `GET /api/catalogo/agencias` (solo lectura); en una ventana acordada, crear una agencia de
+   prueba (moviéndole un distrito), revertirla y revisar `AppCatalogoAuditoria`; abrir Control de asignación y comprobar el combobox del paso 3.
 10. Reversa: restaurar el respaldo y volver al `.env` anterior; `AppCatalogoAuditoria` (JSON del antes/después)
     permite recuperar filas borradas una a una.
 11. Primeras 24 h: revisar bitácora y auditoría.

@@ -25,7 +25,7 @@ backend/
 │   └── routers/
 │       ├── auth.py      # /api/auth: login, logout, me
 │       ├── control.py   # /api/control: estado del periodo, acciones, historial, programaciones
-│       ├── catalogo.py  # /api/catalogo: CRUD de agencias, distritos y municipios
+│       ├── catalogo.py  # /api/catalogo: agencias (alta/renombrar/baja), distritos y municipios (solo modificar)
 │       └── demo.py      # /api/demo: siguiente periodo (solo se incluye con DEMO_MODE=true)
 ├── scripts/create_user.py   # Crea/actualiza un usuario (hash bcrypt)
 ├── scripts/demo.py          # Arranca el backend en modo demo (ENV_FILE=.env.demo) y abre el navegador
@@ -74,11 +74,12 @@ exige sesión y `X-Requested-With`; bitácora del periodo en cada cambio.
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/api/catalogo/agencias` | `[{agencia, distritos, municipios}]` |
+| POST | `/api/catalogo/agencias` | Crea una agencia: `{agencia, distritos:[int], municipios:[id]}`; mueve esas zonas existentes a ella (al menos una; 409 si el nombre ya existe) (201) |
 | PUT / DELETE | `/api/catalogo/agencias/{nombre}` | Renombra (`{agencia}`) o elimina la agencia con todos sus distritos y municipios |
-| GET / POST | `/api/catalogo/distritos` | `[{distrito, agencia}]` / alta `{distrito, agencia}` (201); `distrito` es un entero ≥ 1 |
-| PUT / DELETE | `/api/catalogo/distritos/{distrito:int}` | Modifica o elimina |
-| GET / POST | `/api/catalogo/municipios` | `[{id, municipio, agencia}]` / alta `{municipio, agencia}` (201) |
-| PUT / DELETE | `/api/catalogo/municipios/{id}` | Modifica o elimina |
+| GET | `/api/catalogo/distritos` | `[{distrito, agencia}]`; `distrito` es un entero ≥ 1 (no hay alta: son zonas existentes) |
+| PUT | `/api/catalogo/distritos/{distrito:int}` | Modifica (no se elimina suelto) |
+| GET | `/api/catalogo/municipios` | `[{id, municipio, agencia}]` (no hay alta) |
+| PUT | `/api/catalogo/municipios/{id}` | Modifica (no se elimina suelto) |
 
 **Entornos**: `APP_ENV` (`development`/`production`) y `DB_CONNECTION_STRING` opcional (reemplaza a `DB_*`). Con
 `production`, `config.py` rechaza `DEMO_MODE=true`, `COOKIE_SECURE=false` y un `JWT_SECRET` corto o de ejemplo.

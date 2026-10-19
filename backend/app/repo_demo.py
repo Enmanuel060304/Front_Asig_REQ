@@ -22,9 +22,9 @@ __all__ = [
     "sin_asignar_contar", "sin_asignar_listar", "agencias_listar", "asignar_agencia", "asignados_manual_listar",
     "asignaciones_reaplicar", "asignacion_exportar",
     "cierre_get", "cierre_crear", "cierre_eliminar", "usuario_hash",
-    "catalogo_agencias", "catalogo_distritos", "catalogo_distrito_crear", "catalogo_distrito_actualizar",
-    "catalogo_distrito_eliminar", "catalogo_municipios", "catalogo_municipio_crear", "catalogo_municipio_actualizar",
-    "catalogo_municipio_eliminar", "catalogo_agencia_renombrar", "catalogo_agencia_eliminar",
+    "catalogo_agencias", "catalogo_distritos", "catalogo_distrito_actualizar",
+    "catalogo_municipios", "catalogo_agencia_crear", "catalogo_municipio_actualizar",
+    "catalogo_agencia_renombrar", "catalogo_agencia_eliminar",
 ]
 
 USUARIO_DEMO = "demo"
@@ -508,14 +508,6 @@ def catalogo_distritos() -> list[dict]:
         return [{"distrito": d, "agencia": a} for d, a in sorted(_cat_distritos.items())]
 
 
-def catalogo_distrito_crear(distrito: int, agencia: str, usuario: str) -> dict:
-    with _lock:
-        if distrito in _cat_distritos:
-            raise ClaveDuplicada(f"El distrito {distrito} ya existe")
-        _cat_distritos[distrito] = agencia
-        return {"distrito": distrito, "agencia": agencia}
-
-
 def catalogo_distrito_actualizar(actual: int, distrito: int, agencia: str, usuario: str) -> dict:
     with _lock:
         if actual not in _cat_distritos:
@@ -527,13 +519,6 @@ def catalogo_distrito_actualizar(actual: int, distrito: int, agencia: str, usuar
         return {"distrito": distrito, "agencia": agencia}
 
 
-def catalogo_distrito_eliminar(distrito: int, usuario: str) -> dict:
-    with _lock:
-        if distrito not in _cat_distritos:
-            raise NoEncontrado(f"El distrito {distrito} no existe")
-        return {"distrito": distrito, "agencia": _cat_distritos.pop(distrito)}
-
-
 def catalogo_municipios() -> list[dict]:
     with _lock:
         return sorted(({"id": i, **m} for i, m in _cat_municipios.items()), key=lambda m: m["municipio"])
@@ -541,15 +526,6 @@ def catalogo_municipios() -> list[dict]:
 
 def _municipio_duplicado(nombre: str, excepto: int | None = None) -> bool:
     return any(m["municipio"].casefold() == nombre.casefold() and i != excepto for i, m in _cat_municipios.items())
-
-
-def catalogo_municipio_crear(municipio: str, agencia: str, usuario: str) -> dict:
-    with _lock:
-        if _municipio_duplicado(municipio):
-            raise ClaveDuplicada(f"El municipio «{municipio}» ya existe")
-        id_ = max(_cat_municipios, default=0) + 1
-        _cat_municipios[id_] = {"municipio": municipio, "agencia": agencia}
-        return {"id": id_, "municipio": municipio, "agencia": agencia}
 
 
 def catalogo_municipio_actualizar(id_: int, municipio: str, agencia: str, usuario: str) -> dict:
@@ -562,11 +538,21 @@ def catalogo_municipio_actualizar(id_: int, municipio: str, agencia: str, usuari
         return {"id": id_, "municipio": municipio, "agencia": agencia}
 
 
-def catalogo_municipio_eliminar(id_: int, usuario: str) -> dict:
+def catalogo_agencia_crear(agencia: str, distritos: list[int], municipios: list[int], usuario: str) -> tuple[int, int]:
     with _lock:
-        if id_ not in _cat_municipios:
-            raise NoEncontrado(f"El municipio {id_} no existe")
-        return {"id": id_, **_cat_municipios.pop(id_)}
+        if agencia in set(_cat_distritos.values()) | {m["agencia"] for m in _cat_municipios.values()}:
+            raise ClaveDuplicada(f"La agencia «{agencia}» ya existe")
+        for d in distritos:
+            if d not in _cat_distritos:
+                raise NoEncontrado(f"El distrito {d} no existe")
+        for m in municipios:
+            if m not in _cat_municipios:
+                raise NoEncontrado(f"El municipio {m} no existe")
+        for d in distritos:
+            _cat_distritos[d] = agencia
+        for m in municipios:
+            _cat_municipios[m]["agencia"] = agencia
+        return len(distritos), len(municipios)
 
 
 def catalogo_agencia_renombrar(actual: str, nuevo: str, usuario: str) -> tuple[int, int]:
