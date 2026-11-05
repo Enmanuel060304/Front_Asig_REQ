@@ -291,8 +291,11 @@ def contar_filas(tabla: str) -> int:
 
 
 def ejecutar_sp(nombre: str, param: str, valor: str | None, timeout: int, on_spid) -> int | None:
-    """Ejecuta un SP y devuelve la suma de filas afectadas reportadas (None si el SP usa NOCOUNT)."""
-    with get_connection(timeout=timeout) as conn:
+    """Ejecuta un SP y devuelve la suma de filas afectadas reportadas (None si el SP usa NOCOUNT).
+
+    Con autocommit, como en SSMS: el SP maneja su propia transacción (una transacción abierta por la app alrededor
+    de una lectura por linked server la promovería a distribuida y pediría MSDTC)."""
+    with get_connection(timeout=timeout, autocommit=True) as conn:
         cur = conn.cursor()
         on_spid(cur.execute("SELECT @@SPID").fetchval())
         if param:
@@ -306,7 +309,6 @@ def ejecutar_sp(nombre: str, param: str, valor: str | None, timeout: int, on_spi
                 filas = (filas or 0) + cur.rowcount
             if not cur.nextset():
                 break
-        conn.commit()
     return filas
 
 

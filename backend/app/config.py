@@ -44,6 +44,7 @@ class Settings(BaseSettings):
 
     # Mora
     SP_MORA: str
+    SP_MORA_PARAM_PERIODO: str = ""
     MORA_TABLA: str
     MORA_TIMEOUT_SECONDS: int = 0
 
@@ -146,7 +147,8 @@ class Settings(BaseSettings):
             raise ValueError("ASIGNACION_COLUMNA_APLICA y ASIGNACION_VALOR_APLICA van juntas (las dos o ninguna)")
         return self
 
-    @field_validator("SP_EXTRAER_BAJAS_PARAM_PERIODO", "SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO", "SP_COMPLETAR_PARAM_PERIODO")
+    @field_validator("SP_EXTRAER_BAJAS_PARAM_PERIODO", "SP_EXTRAER_CAMBIO_TEC_PARAM_PERIODO", "SP_MORA_PARAM_PERIODO",
+                     "SP_COMPLETAR_PARAM_PERIODO")
     @classmethod
     def validar_param(cls, v: str, info) -> str:
         if not re.fullmatch(_PARAM_SQL, v):

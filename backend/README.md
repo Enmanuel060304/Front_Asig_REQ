@@ -32,7 +32,7 @@ backend/
 │   ├── 002_control.sql      # AppProcesos, AppValidaciones, AppBitacora, AppProgramaciones
 │   ├── 003_cierre.sql       # AppCierres
 │   ├── 004_asignaciones_manuales.sql  # AppAsignacionesManuales
-│   └── local/               # (fuera de git) SPs de extracción y mora: 196_sps.sql y destino_sps.sql
+│   └── local/               # (fuera de git) SPs de extracción y mora: destino_sps.sql
 ├── .env.example             # Plantilla documentada de configuración
 ├── .env.demo                # Configuración ficticia del modo demo (sí se versiona)
 └── requirements.txt

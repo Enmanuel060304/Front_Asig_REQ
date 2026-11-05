@@ -33,7 +33,7 @@ TIPOS: dict[str, TipoProceso] = {
                                       settings.EXTRACCION_TIMEOUT_SECONDS, ins.clave)
         for ins in insumos.INSUMOS.values()
     },
-    "MORA": TipoProceso("Mora", settings.SP_MORA, "", settings.MORA_TIMEOUT_SECONDS),
+    "MORA": TipoProceso("Mora", settings.SP_MORA, settings.SP_MORA_PARAM_PERIODO, settings.MORA_TIMEOUT_SECONDS),
     "ASIGNACION": TipoProceso("Asignación", settings.SP_ASIGNACION, "", settings.ASIGNACION_TIMEOUT_SECONDS),
 }
 

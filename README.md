@@ -134,10 +134,12 @@ Mora  ┘                         Bajas y Mora OK)
    - `backend/sql/003_cierre.sql` (periodos completados)
    - `backend/sql/004_asignaciones_manuales.sql` (historial de agencias asignadas a mano)
 
-   Los SPs de extracción y mora (que envuelven las consultas por linked server) están en `backend/sql/local/`, fuera
-   de git porque llevan nombres reales: primero `196_sps.sql` en la 196 y luego `destino_sps.sql` en el destino (que
-   además configura el linked server: `rpc out`, `remote proc transaction promotion = false` para no exigir MSDTC y
-   `query timeout` mayor a los ~40 min de la mora).
+   Los SPs de extracción y mora (que envuelven las consultas por linked server) están en
+   `backend/sql/local/destino_sps.sql`, fuera de git porque llevan nombres reales. Se ejecuta en la misma base de la
+   app y usa sus linked servers (`TAESPP_RAC` y la 196). Cada SP lee lo remoto a una tabla temporal y reemplaza el
+   insumo en una transacción corta: si el linked server falla, la tabla conserva lo anterior. La app los ejecuta con
+   autocommit (como SSMS), así no exige MSDTC. El `remote query timeout` del servidor debe cubrir los ~40 min de la
+   mora.
 
    El usuario SQL necesita leer las tablas de insumos (también vía linked server) y ejecutar los SPs de extracción,
    mora y asignación; además `SELECT` en el catálogo de agencias y `SELECT`/`UPDATE` en la tabla de la asignación

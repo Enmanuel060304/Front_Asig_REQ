@@ -19,8 +19,8 @@ def _connection_string() -> str:
 
 
 @contextmanager
-def get_connection(timeout: int = 0):
-    conn = pyodbc.connect(_connection_string(), autocommit=False)
+def get_connection(timeout: int = 0, autocommit: bool = False):
+    conn = pyodbc.connect(_connection_string(), autocommit=autocommit)
     conn.timeout = timeout
     try:
         yield conn
